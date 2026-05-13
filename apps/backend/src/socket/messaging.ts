@@ -1,11 +1,7 @@
 import type { Server } from 'socket.io';
 import { and, eq, lt, desc } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import {
-  conversations,
-  conversationMembers,
-  messages,
-} from '../db/schema.js';
+import { conversations, conversationMembers, messages } from '../db/schema.js';
 import type { AuthSocket } from '../middleware/socketAuth.js';
 
 const PAGE_SIZE = 30;
@@ -69,43 +65,43 @@ export function registerMessagingHandlers(io: Server, socket: AuthSocket): void 
   // ── message_history ────────────────────────────────────────────────────────
   // Payload: { conversationId: string; before?: string } (before = message id cursor)
   // Returns the last PAGE_SIZE messages, optionally before a cursor for pagination.
-  socket.on(
-    'message_history',
-    async (payload: { conversationId: string; before?: string }) => {
-      const { conversationId, before } = payload;
+  socket.on('message_history', async (payload: { conversationId: string; before?: string }) => {
+    const { conversationId, before } = payload;
 
-      const membership = await db.query.conversationMembers.findFirst({
-        where: and(
-          eq(conversationMembers.conversationId, conversationId),
-          eq(conversationMembers.userId, userId),
-        ),
+    const membership = await db.query.conversationMembers.findFirst({
+      where: and(
+        eq(conversationMembers.conversationId, conversationId),
+        eq(conversationMembers.userId, userId),
+      ),
+    });
+
+    if (!membership) {
+      socket.emit('error', {
+        event: 'message_history',
+        message: 'Not a member of this conversation',
       });
+      return;
+    }
 
-      if (!membership) {
-        socket.emit('error', { event: 'message_history', message: 'Not a member of this conversation' });
-        return;
-      }
-
-      let cursor: Date | undefined;
-      if (before) {
-        const ref = await db.query.messages.findFirst({
-          where: eq(messages.id, before),
-        });
-        cursor = ref?.createdAt;
-      }
-
-      const history = await db.query.messages.findMany({
-        where: cursor
-          ? and(eq(messages.conversationId, conversationId), lt(messages.createdAt, cursor))
-          : eq(messages.conversationId, conversationId),
-        orderBy: desc(messages.createdAt),
-        limit: PAGE_SIZE,
-        with: { sender: { columns: { id: true, username: true, avatarUrl: true } } },
+    let cursor: Date | undefined;
+    if (before) {
+      const ref = await db.query.messages.findFirst({
+        where: eq(messages.id, before),
       });
+      cursor = ref?.createdAt;
+    }
 
-      socket.emit('message_history', { conversationId, messages: history.reverse() });
-    },
-  );
+    const history = await db.query.messages.findMany({
+      where: cursor
+        ? and(eq(messages.conversationId, conversationId), lt(messages.createdAt, cursor))
+        : eq(messages.conversationId, conversationId),
+      orderBy: desc(messages.createdAt),
+      limit: PAGE_SIZE,
+      with: { sender: { columns: { id: true, username: true, avatarUrl: true } } },
+    });
+
+    socket.emit('message_history', { conversationId, messages: history.reverse() });
+  });
 
   // ── create_conversation ────────────────────────────────────────────────────
   // Payload: { type: 'dm'|'group'; name?: string; memberIds: string[] }
@@ -117,19 +113,19 @@ export function registerMessagingHandlers(io: Server, socket: AuthSocket): void 
 
       const allMembers = Array.from(new Set([userId, ...memberIds]));
 
-      const [conversation] = await db
-        .insert(conversations)
-        .values({ type, name })
-        .returning();
+      const [conversation] = await db.insert(conversations).values({ type, name }).returning();
 
       if (!conversation) {
-        socket.emit('error', { event: 'create_conversation', message: 'Failed to create conversation' });
+        socket.emit('error', {
+          event: 'create_conversation',
+          message: 'Failed to create conversation',
+        });
         return;
       }
 
-      await db.insert(conversationMembers).values(
-        allMembers.map((uid) => ({ conversationId: conversation.id, userId: uid })),
-      );
+      await db
+        .insert(conversationMembers)
+        .values(allMembers.map((uid) => ({ conversationId: conversation.id, userId: uid })));
 
       socket.emit('conversation_created', conversation);
     },

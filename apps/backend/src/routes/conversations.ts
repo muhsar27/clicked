@@ -16,7 +16,9 @@ conversationsRouter.get('/', async (req: AuthRequest, res) => {
     where: eq(conversationMembers.userId, userId),
     with: {
       conversation: {
-        with: { members: { with: { user: { columns: { id: true, username: true, avatarUrl: true } } } } },
+        with: {
+          members: { with: { user: { columns: { id: true, username: true, avatarUrl: true } } } },
+        },
       },
     },
   });
