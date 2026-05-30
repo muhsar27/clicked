@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import type { IRouter } from 'express';
-import { and, desc, eq, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, lt, sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { conversationMembers, messages } from '../db/schema.js';
 import { requireAuth, type AuthRequest } from '../middleware/auth.js';
@@ -65,6 +65,76 @@ conversationsRouter.get('/', async (req: AuthRequest, res) => {
   }
 
   res.json(result);
+});
+
+// #14 — GET /conversations/:id/messages
+// Cursor-based pagination via ?before=<messageId>&limit=<n> (max 50).
+// Returns messages in ascending order with a `nextCursor` field.
+const MAX_MESSAGES_LIMIT = 50;
+const DEFAULT_MESSAGES_LIMIT = 30;
+
+conversationsRouter.get('/:id/messages', async (req: AuthRequest, res) => {
+  const userId = req.auth!.userId;
+  const conversationId = req.params['id'] as string | undefined;
+
+  if (!conversationId) {
+    res.status(400).json({ error: 'Conversation id is required' });
+    return;
+  }
+
+  // Parse & clamp limit
+  const rawLimit = parseInt(req.query['limit'] as string, 10);
+  const limit = Number.isFinite(rawLimit) && rawLimit > 0
+    ? Math.min(rawLimit, MAX_MESSAGES_LIMIT)
+    : DEFAULT_MESSAGES_LIMIT;
+
+  const before = typeof req.query['before'] === 'string' ? req.query['before'] : undefined;
+
+  // Membership check — non-members receive 403
+  const membership = await db.query.conversationMembers.findFirst({
+    where: and(
+      eq(conversationMembers.conversationId, conversationId),
+      eq(conversationMembers.userId, userId),
+    ),
+  });
+
+  if (!membership) {
+    res.status(403).json({ error: 'Not a member of this conversation' });
+    return;
+  }
+
+  // Resolve cursor: look up the `createdAt` of the "before" message
+  let cursor: Date | undefined;
+  if (before) {
+    const ref = await db.query.messages.findFirst({
+      where: eq(messages.id, before),
+    });
+    if (!ref) {
+      res.status(400).json({ error: 'Invalid cursor' });
+      return;
+    }
+    cursor = ref.createdAt;
+  }
+
+  // Fetch one extra to determine whether there is a next page
+  const rows = await db.query.messages.findMany({
+    where: cursor
+      ? and(eq(messages.conversationId, conversationId), lt(messages.createdAt, cursor))
+      : eq(messages.conversationId, conversationId),
+    orderBy: desc(messages.createdAt),
+    limit: limit + 1,
+    with: { sender: { columns: { id: true, username: true, avatarUrl: true } } },
+  });
+
+  const hasMore = rows.length > limit;
+  const page = hasMore ? rows.slice(0, limit) : rows;
+
+  // Return in ascending (oldest-first) order
+  page.reverse();
+
+  const nextCursor = hasMore ? page[0]?.id ?? null : null;
+
+  res.json({ messages: page, nextCursor });
 });
 
 conversationsRouter.get('/:id/search', async (req: AuthRequest, res) => {

@@ -3,6 +3,8 @@ import { eq } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { users } from '../db/schema.js';
 import { requireAuth, type AuthRequest } from '../middleware/auth.js';
+import { redis } from '../lib/redis.js';
+import { isOnline } from '../services/presence.js';
 
 export const usersRouter: RouterType = Router();
 
@@ -46,4 +48,14 @@ usersRouter.get('/:id', async (req: AuthRequest, res) => {
   } catch {
     res.status(404).json({ error: 'User not found' });
   }
+});
+
+usersRouter.get('/:id/presence', async (req: AuthRequest, res) => {
+  const id = req.params['id'] as string;
+  if (!redis) {
+    res.json({ online: false });
+    return;
+  }
+  const online = await isOnline(redis, id);
+  res.json({ online });
 });

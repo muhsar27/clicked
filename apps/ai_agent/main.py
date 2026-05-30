@@ -42,6 +42,13 @@ class TransferAnalyseResponse(BaseModel):
     confidence: float
 
 
+class IndexMessageRequest(BaseModel):
+    messageId: str
+    conversationId: str
+    senderId: str
+    content: str
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _openai_client():
@@ -105,6 +112,100 @@ def analyse_transfer(request: TransferAnalyseRequest):
         reason=result.get("reason"),
         confidence=float(result.get("confidence", 0.0)),
     )
+
+
+@app.post("/index/message")
+def index_message(request: IndexMessageRequest):
+    try:
+        import weaviate
+        # Attempt connection to Weaviate
+        client = weaviate.connect_to_local()
+    except Exception as e:
+        raise HTTPException(status_code=503, detail="Weaviate connection failed")
+    
+    try:
+        if not client.collections.exists("Message"):
+            client.collections.create(name="Message")
+        
+        collection = client.collections.get("Message")
+        
+        # Get embedding via OpenAI
+        openai_client = _openai_client()
+        res = openai_client.embeddings.create(input=request.content, model="text-embedding-3-small")
+        vector = res.data[0].embedding
+        
+        # Upsert
+        if collection.data.exists(request.messageId):
+            collection.data.replace(
+                uuid=request.messageId,
+                properties={
+                    "conversationId": request.conversationId,
+                    "messageId": request.messageId,
+                    "senderId": request.senderId,
+                    "content": request.content,
+                },
+                vector=vector
+            )
+        else:
+            collection.data.insert(
+                uuid=request.messageId,
+                properties={
+                    "conversationId": request.conversationId,
+                    "messageId": request.messageId,
+                    "senderId": request.senderId,
+                    "content": request.content,
+                },
+                vector=vector
+            )
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    finally:
+        client.close()
+        
+    return {"status": "ok"}
+
+
+@app.get("/search")
+def search_messages(q: str, conversationId: str):
+    try:
+        import weaviate
+        client = weaviate.connect_to_local()
+    except Exception as e:
+        raise HTTPException(status_code=503, detail="Weaviate connection failed")
+        
+    try:
+        if not client.collections.exists("Message"):
+            return {"results": []}
+            
+        collection = client.collections.get("Message")
+        
+        # Get embedding for query
+        openai_client = _openai_client()
+        res = openai_client.embeddings.create(input=q, model="text-embedding-3-small")
+        vector = res.data[0].embedding
+        
+        from weaviate.classes.query import Filter
+        
+        results = collection.query.near_vector(
+            near_vector=vector,
+            limit=5,
+            filters=Filter.by_property("conversationId").equal(conversationId)
+        )
+        
+        hits = []
+        for obj in results.objects:
+            hits.append({
+                "messageId": obj.properties.get("messageId"),
+                "conversationId": obj.properties.get("conversationId"),
+                "senderId": obj.properties.get("senderId"),
+                "content": obj.properties.get("content"),
+            })
+            
+        return {"results": hits}
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    finally:
+        client.close()
 
 
 if __name__ == "__main__":

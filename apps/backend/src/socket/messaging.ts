@@ -1,5 +1,5 @@
 import type { Server } from 'socket.io';
-import { and, eq, lt, desc } from 'drizzle-orm';
+import { and, eq, lt, desc, sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { conversations, conversationMembers, messages } from '../db/schema.js';
 import type { AuthSocket } from '../middleware/socketAuth.js';
@@ -191,4 +191,99 @@ export function registerMessagingHandlers(io: Server, socket: AuthSocket): void 
       }
     },
   );
+  // ── ask_assistant ──────────────────────────────────────────────────────────
+  // Payload: { conversationId: string; content: string }
+  // Forwards to AI agent and posts reply from reserved assistant user.
+  // Rate-limit: 5 requests per user per minute.
+  const ASSISTANT_USER_ID = '00000000-0000-4000-8000-000000000000';
+  
+  socket.on('ask_assistant', async (payload: { conversationId: string; content: string }) => {
+    const { conversationId, content } = payload;
+
+    if (!content?.trim().startsWith('@assistant')) {
+      return;
+    }
+
+    const membership = await db.query.conversationMembers.findFirst({
+      where: and(
+        eq(conversationMembers.conversationId, conversationId),
+        eq(conversationMembers.userId, userId),
+      ),
+    });
+
+    if (!membership) {
+      socket.emit('error', { event: 'ask_assistant', message: 'Not a member of this conversation' });
+      return;
+    }
+
+    // Rate limiting
+    if (redis) {
+      const rlKey = `rl:ask_assistant:${userId}`;
+      const count = await redis.incr(rlKey);
+      if (count === 1) {
+        await redis.expire(rlKey, 60);
+      }
+      if (count > 5) {
+        socket.emit('error', { event: 'rate_limited', message: 'Rate limit exceeded' });
+        return;
+      }
+    }
+
+    // Forward to AI agent
+    try {
+      const response = await fetch('http://localhost:8000/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: content,
+          conversation_id: conversationId,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('AI agent error');
+      }
+
+      const data = await response.json() as { reply: string };
+
+      // Ensure assistant user exists (upsert)
+      // Usually done via migration, but we can safely do it here or assume it exists.
+      // To be safe, we'll try to insert it and ignore conflict.
+      await db.execute(sql`
+        INSERT INTO users (id, username, avatar_url)
+        VALUES (${ASSISTANT_USER_ID}, 'Assistant', 'https://ui-avatars.com/api/?name=AI&background=0D8ABC&color=fff')
+        ON CONFLICT (id) DO NOTHING
+      `);
+
+      // Add to conversation members if not already
+      await db.execute(sql`
+        INSERT INTO conversation_members (conversation_id, user_id)
+        VALUES (${conversationId}, ${ASSISTANT_USER_ID})
+        ON CONFLICT DO NOTHING
+      `);
+
+      // Post the reply
+      const [replyMessage] = await db
+        .insert(messages)
+        .values({
+          conversationId,
+          senderId: ASSISTANT_USER_ID,
+          content: data.reply,
+        })
+        .returning();
+
+      io.to(conversationId).emit('new_message', replyMessage);
+      
+      if (redis) {
+        const members = await db.query.conversationMembers.findMany({
+          where: eq(conversationMembers.conversationId, conversationId),
+        });
+        await Promise.allSettled(members.map((m) => redis!.del(convCacheKey(m.userId))));
+      }
+
+    } catch (err) {
+      console.error('ask_assistant error:', err);
+      socket.emit('error', { event: 'ask_assistant', message: 'Failed to get AI reply' });
+    }
+  });
 }
