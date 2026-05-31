@@ -3,9 +3,14 @@ import { Server } from 'socket.io';
 import { createAdapter } from '@socket.io/redis-adapter';
 import { createClient } from 'redis';
 import dotenv from 'dotenv';
+import { eq } from 'drizzle-orm';
+import { db } from './db/index.js';
+import { conversationMembers } from './db/schema.js';
 import { socketAuthMiddleware, type AuthSocket } from './middleware/socketAuth.js';
 import { registerMessagingHandlers } from './socket/messaging.js';
 import { app } from './app.js';
+import { redis as appRedis } from './lib/redis.js';
+import { setOnline, setOffline, refreshPresence } from './services/presence.js';
 import {
   buildRpcFetcher,
   runForever as runStellarListener,
@@ -20,11 +25,43 @@ const io = new Server(httpServer, {
 
 io.use(socketAuthMiddleware);
 
-io.on('connection', (socket: AuthSocket) => {
-  console.log('User connected:', socket.auth?.userId, socket.id);
+io.on('connection', async (socket: AuthSocket) => {
+  const userId = socket.auth!.userId;
+  console.log('User connected:', userId, socket.id);
+  
+  if (appRedis) {
+    await setOnline(appRedis, userId, socket.id);
+    const memberships = await db.query.conversationMembers.findMany({
+      where: eq(conversationMembers.userId, userId),
+      columns: { conversationId: true },
+    });
+    for (const m of memberships) {
+      io.to(m.conversationId).emit('user_online', { userId });
+    }
+  }
+
+  socket.on('heartbeat', async () => {
+    if (appRedis) {
+      await refreshPresence(appRedis, userId);
+    }
+  });
+
   registerMessagingHandlers(io, socket);
-  socket.on('disconnect', () => {
-    console.log('User disconnected:', socket.auth?.userId);
+
+  socket.on('disconnect', async () => {
+    console.log('User disconnected:', userId);
+    if (appRedis) {
+      const fullyOffline = await setOffline(appRedis, userId, socket.id);
+      if (fullyOffline) {
+        const memberships = await db.query.conversationMembers.findMany({
+          where: eq(conversationMembers.userId, userId),
+          columns: { conversationId: true },
+        });
+        for (const m of memberships) {
+          io.to(m.conversationId).emit('user_offline', { userId });
+        }
+      }
+    }
   });
 });
 
