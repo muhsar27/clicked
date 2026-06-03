@@ -1,135 +1,133 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import React, { useState } from "react";
 import type { Socket } from "socket.io-client";
-import { Spinner } from "@/components/ui/Spinner";
+import transferToken from "../../lib/soroban";
 
-const MAX_CHARS = 2000;
-const SOFT_COUNT_THRESHOLD = 1800;
-const MAX_LINES = 4;
-const LINE_HEIGHT = 24;
-const TYPING_STOP_DELAY = 2000;
-
-type MessageInputProps = {
-  disabled: boolean;
-  isSending: boolean;
-  onSend: (message: string) => Promise<void>;
-  socket?: Socket | null;
-  conversationId?: string;
+type Props = {
+  conversationId: string;
+  recipient: string;
+  socket: Socket | null;
 };
 
-export function MessageInput({ disabled, isSending, onSend, socket, conversationId }: MessageInputProps) {
-  const [value, setValue] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
-  const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const isTypingRef = useRef(false);
+export default function MessageInput({ conversationId, recipient, socket }: Props) {
+  const [text, setText] = useState("");
+  const [showPay, setShowPay] = useState(false);
+  const [amount, setAmount] = useState<string>("");
+  const [busy, setBusy] = useState(false);
 
-  const showCharacterCount = value.length > SOFT_COUNT_THRESHOLD;
-  const remainingChars = MAX_CHARS - value.length;
+  function handleSendText() {
+    if (!text.trim() || !socket) return;
+    socket.emit("send_message", {
+      conversationId,
+      content: text.trim(),
+    });
+    setText("");
+  }
 
-  const hasReachedMaxLines = useMemo(() => {
-    const lines = value.split("\n").length;
-    return lines >= MAX_LINES;
-  }, [value]);
-
-  const resizeTextarea = () => {
-    const textarea = textareaRef.current;
-    if (!textarea) {
+  async function handleConfirmTransfer() {
+    const n = Number(amount);
+    if (!n || n <= 0) {
+      alert("Amount must be > 0");
       return;
     }
 
-    textarea.style.height = "auto";
-    textarea.style.height = `${Math.min(textarea.scrollHeight, LINE_HEIGHT * MAX_LINES)}px`;
-  };
-
-  const handleChange = (nextValue: string) => {
-    if (nextValue.length > MAX_CHARS) {
-      return;
-    }
-    setValue(nextValue);
-    setError(null);
-    requestAnimationFrame(resizeTextarea);
-
-    if (socket && conversationId) {
-      if (!isTypingRef.current) {
-        isTypingRef.current = true;
-        socket.emit("typing_start", { conversationId });
-      }
-      if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
-      typingTimerRef.current = setTimeout(() => {
-        isTypingRef.current = false;
-        socket.emit("typing_stop", { conversationId });
-      }, TYPING_STOP_DELAY);
-    }
-  };
-
-  const submit = async () => {
-    const trimmed = value.trim();
-    if (!trimmed || disabled || isSending) {
+    if (!socket) {
+      alert("Not connected to chat");
       return;
     }
 
-    // Stop typing indicator on send
-    if (socket && conversationId && isTypingRef.current) {
-      isTypingRef.current = false;
-      if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
-      socket.emit("typing_stop", { conversationId });
-    }
-
-    setError(null);
-
+    setBusy(true);
     try {
-      await onSend(trimmed);
-      setValue("");
-      requestAnimationFrame(resizeTextarea);
-    } catch (sendError) {
-      setError(sendError instanceof Error ? sendError.message : "Failed to send message");
+      const txHash = await transferToken(recipient, Math.floor(n));
+      const transferMsg = {
+        type: "transfer",
+        amount: Math.floor(n),
+        token: "TOKEN",
+        txHash,
+      };
+      socket.emit("send_message", {
+        conversationId,
+        content: JSON.stringify(transferMsg),
+      });
+      setAmount("");
+      setShowPay(false);
+    } catch (err: any) {
+      alert(String(err?.message || err));
+    } finally {
+      setBusy(false);
     }
-  };
+  }
 
   return (
-    <div className="rounded-2xl border border-[#0F172A]/10 bg-white p-3">
-      <textarea
-        ref={textareaRef}
-        rows={1}
-        value={value}
-        disabled={disabled || isSending}
-        placeholder="Type your message…"
-        onChange={(event) => handleChange(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key === "Enter" && !event.shiftKey) {
-            event.preventDefault();
-            void submit();
-            return;
-          }
+    <div className="p-3 border-t flex items-center gap-2 relative">
+      <button
+        title="Send payment"
+        onClick={() => setShowPay((s) => !s)}
+        className="p-2 rounded hover:bg-gray-100"
+        disabled={busy}
+      >
+        🪙
+      </button>
 
-          if (event.key === "Enter" && event.shiftKey && hasReachedMaxLines) {
-            event.preventDefault();
-          }
+      <input
+        className="flex-1 p-2 border rounded"
+        placeholder="Type a message..."
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") handleSendText();
         }}
-        className="max-h-24 min-h-6 w-full resize-none bg-transparent text-sm text-[#0F172A] outline-none placeholder:text-[#64748B] disabled:cursor-not-allowed disabled:opacity-70"
+        disabled={busy}
       />
 
-      <div className="mt-3 flex items-center justify-between gap-3">
-        <div className="text-xs text-[#64748B]">
-          {showCharacterCount ? (
-            <span className={remainingChars < 0 ? "text-red-600" : undefined}>
-              {value.length}/{MAX_CHARS}
-            </span>
-          ) : null}
-          {error ? <span className="ml-2 text-red-600">{error}</span> : null}
+      <button
+        className="px-3 py-2 bg-blue-600 text-white rounded disabled:opacity-50"
+        onClick={handleSendText}
+        disabled={busy}
+      >
+        Send
+      </button>
+
+      {showPay && (
+        <div className="absolute bottom-20 left-0 w-80 bg-white border rounded shadow-lg p-4 z-50">
+          <div className="text-sm font-semibold mb-2">Send token</div>
+          <label className="block text-xs text-gray-600">Recipient</label>
+          <input
+            className="w-full p-2 border rounded mb-2 text-sm"
+            value={recipient}
+            readOnly
+          />
+
+          <label className="block text-xs text-gray-600 mt-2">Amount</label>
+          <input
+            className="w-full p-2 border rounded mb-3"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            placeholder="Amount (integer units)"
+            type="number"
+            min={1}
+            disabled={busy}
+          />
+
+          <div className="flex justify-end gap-2">
+            <button
+              className="px-3 py-1 text-sm"
+              onClick={() => setShowPay(false)}
+              disabled={busy}
+            >
+              Cancel
+            </button>
+            <button
+              className="px-3 py-1 bg-green-600 text-white rounded text-sm disabled:opacity-50"
+              onClick={handleConfirmTransfer}
+              disabled={busy}
+            >
+              {busy ? "Processing..." : "Confirm"}
+            </button>
+          </div>
         </div>
-        <button
-          type="button"
-          onClick={() => void submit()}
-          disabled={disabled || isSending || !value.trim()}
-          className="inline-flex items-center gap-2 rounded-full bg-[#0F172A] px-4 py-2 text-xs font-semibold text-white transition hover:bg-[#1E293B] disabled:cursor-not-allowed disabled:bg-[#94A3B8]"
-        >
-          {isSending ? <Spinner size="sm" label="Sending..." /> : null}
-          {isSending ? "Sending..." : "Send"}
-        </button>
-      </div>
+      )}
     </div>
   );
 }

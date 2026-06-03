@@ -1,12 +1,8 @@
 "use client";
 
-import { AuthProvider } from "@/contexts/AuthContext";
-import { WalletProvider } from "@/contexts/WalletContext";
+import React from "react";
+import { AuthProvider } from "../lib/auth";
 
 export function Providers({ children }: { children: React.ReactNode }) {
-  return (
-    <WalletProvider>
-      <AuthProvider>{children}</AuthProvider>
-    </WalletProvider>
-  );
+  return <AuthProvider>{children}</AuthProvider>;
 }
