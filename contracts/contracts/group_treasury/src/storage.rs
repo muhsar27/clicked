@@ -5,9 +5,10 @@ pub enum DataKey {
     Admin,
     Balances,
     Members,
-    Threshold,     // u32: approvals required to execute a withdraw proposal
-    ProposalCount, // u32: total proposals created (also next id source)
-    Proposal(u32), // WithdrawProposal by id
+    Threshold,          // u32: approvals required to execute a withdraw proposal
+    ProposalCount,      // u32: total proposals created (also next id source)
+    Proposal(u32),      // WithdrawProposal by id
+    Vote(u32, Address), // (proposal_id, voter) -> bool (true = approve, false = reject)
 }
 
 #[contracttype]
@@ -55,4 +56,27 @@ pub struct MemberAddedEvent {
 pub struct MemberRemovedEvent {
     pub member: Address,
     pub removed_by: Address,
+}
+
+/// Emitted whenever a member casts a vote on a withdraw proposal.
+#[contracttype]
+pub struct WithdrawVoteCastEvent {
+    pub id: u32,
+    pub voter: Address,
+    pub approve: bool,
+}
+
+/// Emitted when a proposal's approvals reach the configured threshold.
+#[contracttype]
+pub struct ProposalApprovedEvent {
+    pub id: u32,
+    pub approvals: u32,
+    pub threshold: u32,
+}
+
+/// Emitted when a proposal's rejections reach the blocking minority.
+#[contracttype]
+pub struct ProposalRejectedEvent {
+    pub id: u32,
+    pub rejections: u32,
 }

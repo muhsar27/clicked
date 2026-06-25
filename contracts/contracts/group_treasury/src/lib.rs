@@ -5,7 +5,10 @@ mod test;
 mod token_interface;
 
 use soroban_sdk::{contract, contractimpl, Address, Env, Map, Symbol, Vec};
-use storage::{DataKey, DepositEvent, MemberAddedEvent, MemberRemovedEvent, WithdrawEvent};
+use storage::{
+    DataKey, DepositEvent, MemberAddedEvent, MemberRemovedEvent, ProposalApprovedEvent,
+    ProposalRejectedEvent, ProposalStatus, WithdrawEvent, WithdrawProposal, WithdrawVoteCastEvent,
+};
 use token_interface::TokenClient;
 
 fn require_admin(env: &Env) -> Address {
@@ -37,9 +40,7 @@ impl GroupTreasuryContract {
         env.storage()
             .instance()
             .set(&DataKey::Threshold, &threshold);
-        env.storage()
-            .instance()
-            .set(&DataKey::ProposalCount, &0u32);
+        env.storage().instance().set(&DataKey::ProposalCount, &0u32);
         let balances: Map<Address, i128> = Map::new(&env);
         env.storage().instance().set(&DataKey::Balances, &balances);
         let members: Vec<Address> = Vec::new(&env);
@@ -208,5 +209,140 @@ impl GroupTreasuryContract {
             .unwrap_or_else(|| Map::new(&env));
 
         balances.get(token).unwrap_or(0)
+    }
+
+    /// Member-only: approve a pending withdraw proposal. Each member may vote at
+    /// most once per proposal. When the running approval count reaches the
+    /// configured `threshold` the proposal transitions to `Passed` (approved)
+    /// and a `ProposalApprovedEvent` is emitted.
+    pub fn approve_withdraw(env: Env, approver: Address, proposal_id: u32) {
+        let mut proposal = Self::require_votable(&env, &approver, proposal_id);
+
+        env.storage()
+            .instance()
+            .set(&DataKey::Vote(proposal_id, approver.clone()), &true);
+
+        proposal.approvals += 1;
+
+        let threshold: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::Threshold)
+            .expect("not initialized");
+
+        if proposal.approvals >= threshold {
+            proposal.status = ProposalStatus::Passed;
+            env.events().publish(
+                (Symbol::new(&env, "proposal_approved"),),
+                ProposalApprovedEvent {
+                    id: proposal_id,
+                    approvals: proposal.approvals,
+                    threshold,
+                },
+            );
+        }
+
+        env.storage()
+            .instance()
+            .set(&DataKey::Proposal(proposal_id), &proposal);
+
+        env.events().publish(
+            (Symbol::new(&env, "withdraw_vote"),),
+            WithdrawVoteCastEvent {
+                id: proposal_id,
+                voter: approver,
+                approve: true,
+            },
+        );
+    }
+
+    /// Member-only: reject a pending withdraw proposal. Each member may vote at
+    /// most once per proposal. When the rejection count reaches the blocking
+    /// minority — the point at which the remaining members can no longer reach
+    /// `threshold` approvals — the proposal transitions to `Rejected` and a
+    /// `ProposalRejectedEvent` is emitted.
+    pub fn reject_withdraw(env: Env, rejecter: Address, proposal_id: u32) {
+        let mut proposal = Self::require_votable(&env, &rejecter, proposal_id);
+
+        env.storage()
+            .instance()
+            .set(&DataKey::Vote(proposal_id, rejecter.clone()), &false);
+
+        proposal.rejections += 1;
+
+        let threshold: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::Threshold)
+            .expect("not initialized");
+        let member_count = Self::get_members(env.clone()).len();
+        // Approval becomes impossible once fewer than `threshold` members remain
+        // un-rejected, i.e. once rejections > member_count - threshold.
+        let blocking_minority = member_count.saturating_sub(threshold) + 1;
+
+        if proposal.rejections >= blocking_minority {
+            proposal.status = ProposalStatus::Rejected;
+            env.events().publish(
+                (Symbol::new(&env, "proposal_rejected"),),
+                ProposalRejectedEvent {
+                    id: proposal_id,
+                    rejections: proposal.rejections,
+                },
+            );
+        }
+
+        env.storage()
+            .instance()
+            .set(&DataKey::Proposal(proposal_id), &proposal);
+
+        env.events().publish(
+            (Symbol::new(&env, "withdraw_vote"),),
+            WithdrawVoteCastEvent {
+                id: proposal_id,
+                voter: rejecter,
+                approve: false,
+            },
+        );
+    }
+
+    /// Returns the withdraw proposal with the given id. Panics if it does not exist.
+    pub fn get_proposal(env: Env, proposal_id: u32) -> WithdrawProposal {
+        env.storage()
+            .instance()
+            .get(&DataKey::Proposal(proposal_id))
+            .expect("proposal not found")
+    }
+
+    /// Shared validation for voting: authenticates the voter, confirms
+    /// membership, loads the proposal, and ensures it is pending, not expired,
+    /// and not already voted on by this address. Returns the loaded proposal.
+    fn require_votable(env: &Env, voter: &Address, proposal_id: u32) -> WithdrawProposal {
+        voter.require_auth();
+
+        if !Self::is_member(env.clone(), voter.clone()) {
+            panic!("not a member");
+        }
+
+        let proposal: WithdrawProposal = env
+            .storage()
+            .instance()
+            .get(&DataKey::Proposal(proposal_id))
+            .expect("proposal not found");
+
+        if proposal.status != ProposalStatus::Active {
+            panic!("proposal is not pending");
+        }
+        if env.ledger().timestamp() >= proposal.expires_at {
+            panic!("proposal expired");
+        }
+        if env
+            .storage()
+            .instance()
+            .has(&DataKey::Vote(proposal_id, voter.clone()))
+        {
+            panic!("already voted");
+        }
+
+        proposal
     }
 }
