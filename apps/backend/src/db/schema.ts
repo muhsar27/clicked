@@ -29,6 +29,30 @@ export const wallets = pgTable('wallets', {
   createdAt: timestamp('created_at').notNull().defaultNow(),
 });
 
+export const devices = pgTable('devices', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  deviceId: text('device_id').notNull(),
+  deviceName: text('device_name').notNull(),
+  platform: text('platform').notNull(),
+  identityPublicKey: text('identity_public_key').notNull(),
+  registrationId: text('registration_id'),
+  isRevoked: boolean('is_revoked').notNull().default(false),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+export const devicePrekeys = pgTable('device_prekeys', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  deviceId: uuid('device_id')
+    .notNull()
+    .references(() => devices.id, { onDelete: 'cascade' }),
+  prekey: text('prekey').notNull(),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+});
+
 // ─── Conversations ────────────────────────────────────────────────────────────
 
 export const conversationTypeEnum = pgEnum('conversation_type', ['dm', 'group']);
@@ -183,6 +207,15 @@ export const tokenTransfersRelations = relations(tokenTransfers, ({ one }) => ({
   }),
 }));
 
+export const devicesRelations = relations(devices, ({ one, many }) => ({
+  user: one(users, { fields: [devices.userId], references: [users.id] }),
+  prekeys: many(devicePrekeys),
+}));
+
+export const devicePrekeysRelations = relations(devicePrekeys, ({ one }) => ({
+  device: one(devices, { fields: [devicePrekeys.deviceId], references: [devices.id] }),
+}));
+
 export const userDevicesRelations = relations(userDevices, ({ one }) => ({
   user: one(users, { fields: [userDevices.userId], references: [users.id] }),
 }));
@@ -200,5 +233,9 @@ export type Message = typeof messages.$inferSelect;
 export type NewMessage = typeof messages.$inferInsert;
 export type TokenTransfer = typeof tokenTransfers.$inferSelect;
 export type NewTokenTransfer = typeof tokenTransfers.$inferInsert;
+export type Device = typeof devices.$inferSelect;
+export type NewDevice = typeof devices.$inferInsert;
+export type DevicePrekey = typeof devicePrekeys.$inferSelect;
+export type NewDevicePrekey = typeof devicePrekeys.$inferInsert;
 export type UserDevice = typeof userDevices.$inferSelect;
 export type NewUserDevice = typeof userDevices.$inferInsert;
