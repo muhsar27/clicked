@@ -75,7 +75,6 @@ fn setup(
     Address, // carol
 group_treasury::GroupTreasuryContractClient<'static>,
 
-
     Address, // treasury_admin
     Address, // treasury_member
     Address, // token_id
