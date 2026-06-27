@@ -67,19 +67,19 @@ function makeApp() {
 const VALID_BODY = {
   signedPreKey: {
     keyId: 1,
-    publicKey: 'c2lnbmVkUHVibGljS2V5', // base64 placeholder
-    signature: 'c2lnbmF0dXJl', // base64 placeholder
+    publicKey: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=', // 32-byte base64 placeholder
+    signature: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==', // 64-byte base64 placeholder
   },
   oneTimePreKeys: [
-    { keyId: 10, publicKey: 'b25lVGltZTEw' },
-    { keyId: 11, publicKey: 'b25lVGltZTEx' },
+    { keyId: 10, publicKey: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=' },
+    { keyId: 11, publicKey: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=' },
   ],
 };
 
 const ACTIVE_DEVICE = {
   id: 'device-1',
   userId: 'owner-user-id',
-  identityPublicKey: 'aWRlbnRpdHlLZXk=',
+  identityPublicKey: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
   isRevoked: false,
 };
 
