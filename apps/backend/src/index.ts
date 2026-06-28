@@ -53,7 +53,12 @@ io.on('connection', async (socket: AuthSocket) => {
     if (shouldBroadcast) {
       for (const m of memberships) {
         io.to(m.conversationId).emit('user_online', { userId });
-        io.to(m.conversationId).emit('presence_update', { userId, online: true, status: 'online', lastSeen: Date.now() });
+        io.to(m.conversationId).emit('presence_update', {
+          userId,
+          online: true,
+          status: 'online',
+          lastSeen: Date.now(),
+        });
       }
     }
   }
@@ -80,7 +85,12 @@ io.on('connection', async (socket: AuthSocket) => {
             });
             for (const m of memberships) {
               io.to(m.conversationId).emit('user_offline', { userId });
-              io.to(m.conversationId).emit('presence_update', { userId, online: false, status: 'offline', lastSeen: Date.now() });
+              io.to(m.conversationId).emit('presence_update', {
+                userId,
+                online: false,
+                status: 'offline',
+                lastSeen: Date.now(),
+              });
             }
           }
         }, 3000);
