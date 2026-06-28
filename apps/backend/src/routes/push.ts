@@ -52,12 +52,11 @@ pushRouter.delete('/subscriptions', async (req: AuthRequest, res) => {
   }
 
   try {
-    await db.delete(pushSubscriptions).where(
-      and(
-        eq(pushSubscriptions.endpoint, endpoint),
-        eq(pushSubscriptions.deviceId, deviceId)
-      )
-    );
+    await db
+      .delete(pushSubscriptions)
+      .where(
+        and(eq(pushSubscriptions.endpoint, endpoint), eq(pushSubscriptions.deviceId, deviceId)),
+      );
     res.status(204).send();
   } catch {
     res.status(500).json({ error: 'Failed to delete subscription' });

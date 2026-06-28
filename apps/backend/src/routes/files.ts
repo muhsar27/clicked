@@ -17,7 +17,7 @@ const bucketName = process.env['AWS_BUCKET'] || 'clicked-files';
 
 filesRouter.get('/:fileId', async (req: AuthRequest, res) => {
   const userId = req.auth!.userId;
-  const fileId = req.params['fileId'];
+  const fileId = req.params['fileId'] as string;
 
   if (!fileId) {
     res.status(400).json({ error: 'File id is required' });
