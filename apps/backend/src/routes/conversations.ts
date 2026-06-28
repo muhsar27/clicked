@@ -20,7 +20,6 @@ export const conversationsRouter: IRouter = Router();
 
 conversationsRouter.use(requireAuth);
 
-const SEARCH_RESULT_LIMIT = 20;
 
 const getConversationRelations = (deviceId: string) => ({
   members: {

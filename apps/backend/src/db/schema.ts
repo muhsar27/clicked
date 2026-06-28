@@ -9,7 +9,6 @@ import {
   integer,
   serial,
   uniqueIndex,
-  bigint,
 } from 'drizzle-orm/pg-core';
 import { relations, sql } from 'drizzle-orm';
 
