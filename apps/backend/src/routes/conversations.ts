@@ -28,7 +28,11 @@ const conversationRelations = {
   messages: {
     orderBy: desc(messages.createdAt),
     limit: 1,
-    with: { sender: { columns: { id: true, username: true, avatarUrl: true } }, envelopes: true, senderDevice: true },
+    with: {
+      sender: { columns: { id: true, username: true, avatarUrl: true } },
+      envelopes: true,
+      senderDevice: true,
+    },
   },
 } as const;
 
@@ -230,7 +234,9 @@ conversationsRouter.get('/:id/members', async (req: AuthRequest, res) => {
     with: {
       user: {
         columns: { id: true, username: true, avatarUrl: true },
-        with: { wallets: { columns: { address: true, isPrimary: true } } },
+        with: {
+          wallets: { columns: { address: true, isPrimary: true } },
+        },
       },
     },
   })) as ConversationMemberPayload[];
@@ -471,7 +477,11 @@ conversationsRouter.get('/:id/messages', async (req: AuthRequest, res) => {
       : eq(messages.conversationId, conversationId),
     orderBy: desc(messages.createdAt),
     limit: limit + 1,
-    with: { sender: { columns: { id: true, username: true, avatarUrl: true } }, envelopes: true, senderDevice: true },
+    with: {
+      sender: { columns: { id: true, username: true, avatarUrl: true } },
+      envelopes: true,
+      senderDevice: true,
+    },
   });
 
   const hasMore = rows.length > limit;
