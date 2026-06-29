@@ -15,9 +15,12 @@ import { invalidateConversationCaches } from '../lib/conversationCache.js';
 import { serializeMessage } from '../lib/messages.js';
 import { redis } from '../lib/redis.js';
 import { validateMessagePayload } from '../lib/validateMessagePayload.js';
+<<<<<<< HEAD
 import { dispatchOfflinePush, FILE_CONTENT_TYPES } from '../services/pushNotification.js';
 import { deliverMessage } from '../services/deliveryPipeline.js';
 import { publishEphemeral, readMissedEvents } from '../services/resumeStream.js';
+=======
+>>>>>>> e7b25b359e78829a44d02d24946ee0d04af1ee32
 
 const PAGE_SIZE = 30;
 
@@ -78,10 +81,32 @@ export function registerMessagingHandlers(io: Server, socket: AuthSocket): void 
       /** UUID of an already-uploaded file; required for file/image/video/audio messages */
       fileId?: string;
     }) => {
+<<<<<<< HEAD
       const { conversationId, messageId, content, contentType, ciphertext, envelopes, fileId } =
         payload;
       const deviceId = socket.auth!.deviceId;
 
+=======
+      const { conversationId, messageId, contentType, ciphertext, envelopes, fileId } = payload;
+      const deviceId = socket.auth!.deviceId;
+
+      if (!messageId) {
+        socket.emit('error', { event: 'send_message', message: 'messageId is required' });
+        return;
+      }
+
+      // ── content-type-specific validation ────────────────────────────────────
+      const validation = validateMessagePayload({ contentType, ciphertext, envelopes, fileId });
+      if (!validation.ok) {
+        socket.emit('error', {
+          event: 'send_message',
+          code: validation.code,
+          message: validation.message,
+        });
+        return;
+      }
+
+>>>>>>> e7b25b359e78829a44d02d24946ee0d04af1ee32
       const membership = await db.query.conversationMembers.findFirst({
         where: and(
           eq(conversationMembers.conversationId, conversationId),
@@ -280,7 +305,12 @@ export function registerMessagingHandlers(io: Server, socket: AuthSocket): void 
           conversationId,
           senderId: userId,
           senderDeviceId: deviceId,
+<<<<<<< HEAD
           contentType: contentType || original.contentType,
+=======
+          // Normalise to the validated value (validator already lower-cased it)
+          contentType: contentType?.trim().toLowerCase() || 'text',
+>>>>>>> e7b25b359e78829a44d02d24946ee0d04af1ee32
           ciphertext: ciphertext || null,
           editsMessageId: rootMessageId,
         })
