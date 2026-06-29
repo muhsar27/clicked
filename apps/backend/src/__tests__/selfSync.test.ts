@@ -135,7 +135,9 @@ beforeEach(() => {
   mockMessageFindFirst.mockReset().mockResolvedValue(undefined);
   mockMemberFindMany.mockReset().mockResolvedValue([]);
   mockUserDevicesFindMany.mockReset().mockResolvedValue([]);
-  mockReturning.mockReset().mockResolvedValue([{ ...BASE_MESSAGE, id: 'new-msg', sequenceNumber: 2 }]);
+  mockReturning
+    .mockReset()
+    .mockResolvedValue([{ ...BASE_MESSAGE, id: 'new-msg', sequenceNumber: 2 }]);
 
   // Only clear call history for structural vi.fn(impl) mocks — mockReset would
   // wipe their implementations and break the insert().values().returning() chain.
@@ -336,9 +338,7 @@ describe('edit_message — sibling device enforcement (#188)', () => {
   });
 
   it('rejects an edit with device_set_mismatch when a sibling is missing', async () => {
-    mockMessageFindFirst
-      .mockResolvedValueOnce(ORIGINAL)
-      .mockResolvedValueOnce(undefined);
+    mockMessageFindFirst.mockResolvedValueOnce(ORIGINAL).mockResolvedValueOnce(undefined);
     mockUserDevicesFindMany.mockResolvedValueOnce([{ id: SIBLING_B }, { id: SIBLING_C }]);
 
     const socket = makeSocket(USER_ID, SENDER_DEVICE);
@@ -363,9 +363,7 @@ describe('edit_message — sibling device enforcement (#188)', () => {
   });
 
   it('accepts an edit when the sender has no sibling devices', async () => {
-    mockMessageFindFirst
-      .mockResolvedValueOnce(ORIGINAL)
-      .mockResolvedValueOnce(undefined);
+    mockMessageFindFirst.mockResolvedValueOnce(ORIGINAL).mockResolvedValueOnce(undefined);
     mockUserDevicesFindMany.mockResolvedValueOnce([]); // no siblings
 
     const socket = makeSocket(USER_ID, SENDER_DEVICE);

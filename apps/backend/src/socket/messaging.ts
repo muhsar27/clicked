@@ -22,10 +22,7 @@ const PAGE_SIZE = 30;
  * "sibling" devices that must each receive their own envelope so they can
  * decrypt the message locally. Issue #188.
  */
-async function fetchSiblingDeviceIds(
-  userId: string,
-  senderDeviceId: string,
-): Promise<string[]> {
+async function fetchSiblingDeviceIds(userId: string, senderDeviceId: string): Promise<string[]> {
   const siblings = await db.query.userDevices.findMany({
     where: and(
       eq(userDevices.userId, userId),
