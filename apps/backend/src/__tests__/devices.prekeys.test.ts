@@ -35,14 +35,12 @@ vi.mock('drizzle-orm', () => ({
 }));
 
 // Stub crypto verify so we can control the outcome in tests.
+// keys.ts uses the one-shot `verify` (not the streaming `createVerify`).
 vi.mock('node:crypto', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:crypto')>();
   return {
     ...actual,
-    createVerify: vi.fn(() => ({
-      update: vi.fn().mockReturnThis(),
-      verify: vi.fn(() => true), // valid by default
-    })),
+    verify: vi.fn(() => true), // valid by default
   };
 });
 
@@ -55,7 +53,7 @@ vi.mock('../middleware/auth.js', () => ({
 }));
 
 const { devicesRouter } = await import('../routes/devices.js');
-const { createVerify } = await import('node:crypto');
+const { verify: cryptoVerify } = await import('node:crypto');
 
 function makeApp() {
   const app = express();
@@ -133,10 +131,7 @@ describe('POST /devices/:id/prekeys', () => {
   it('returns 400 when signed prekey signature is invalid', async () => {
     mockDeviceFindFirst.mockResolvedValue(ACTIVE_DEVICE);
     // Override the crypto mock to return false for this test.
-    vi.mocked(createVerify).mockReturnValueOnce({
-      update: vi.fn().mockReturnThis(),
-      verify: vi.fn(() => false),
-    } as unknown as ReturnType<typeof createVerify>);
+    vi.mocked(cryptoVerify).mockReturnValueOnce(false);
 
     const res = await request(makeApp()).post('/devices/device-1/prekeys').send(VALID_BODY);
 
