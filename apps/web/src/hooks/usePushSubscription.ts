@@ -11,7 +11,7 @@ function vapidKeyToUint8Array(base64url: string): Uint8Array {
   const padding = "=".repeat((4 - (base64url.length % 4)) % 4);
   const base64 = (base64url + padding).replace(/-/g, "+").replace(/_/g, "/");
   const raw = atob(base64);
-  return Uint8Array.from([...raw].map((c) => c.charCodeAt(0)));
+  return new Uint8Array([...raw].map((c) => c.charCodeAt(0)));
 }
 
 async function postSubscription(sub: PushSubscription, token: string): Promise<void> {
