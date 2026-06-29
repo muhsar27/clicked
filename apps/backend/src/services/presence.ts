@@ -16,7 +16,7 @@ import { eq } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { conversationMembers } from '../db/schema.js';
 
-const PRESENCE_TTL = 60; // seconds
+const PRESENCE_TTL = 90; // seconds
 
 function presenceKey(userId: string): string {
   return `presence:${userId}`;
@@ -56,6 +56,15 @@ export async function setOffline(redis: Redis, userId: string, socketId: string)
     return true;
   }
   return false;
+}
+
+/**
+ * Forcefully mark a user offline by deleting their presence key.
+ * Used when a heartbeat timeout or device revocation occurs.
+ */
+export async function markDeviceOffline(redis: Redis, userId: string): Promise<void> {
+  const key = presenceKey(userId);
+  await redis.del(key);
 }
 
 /**

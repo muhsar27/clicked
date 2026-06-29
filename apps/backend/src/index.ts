@@ -12,6 +12,7 @@ import { app } from './app.js';
 import { redis as appRedis } from './lib/redis.js';
 import { setSocketServer } from './lib/socket.js';
 
+
 import {
   setOnline,
   setOffline,
@@ -19,6 +20,9 @@ import {
   reconcileBoot,
   cleanupStaleSockets,
 } from './services/presence.js';
+
+
+import { setOnline, setOffline } from './services/presence.js';
 
 import { startHeartbeatTimer, clearHeartbeatTimer } from './services/heartbeat.js';
 import {
@@ -34,6 +38,9 @@ import {
   clearViolations,
 } from './services/rateLimit.js';
 import { registerForBackpressure, unregisterForBackpressure } from './services/backpressure.js';
+
+
+
 
 import {
   buildRpcFetcher,
@@ -158,6 +165,7 @@ io.on('connection', async (socket: AuthSocket) => {
     }
   }
 
+
   socket.on('heartbeat', async () => {
     if (appRedis) {
       await cleanupStaleSockets(io, appRedis, userId, socket.id);
@@ -165,17 +173,24 @@ io.on('connection', async (socket: AuthSocket) => {
     }
   });
 
+
   registerMessagingHandlers(io, socket);
 
   // Monitor send-buffer to detect slow/stalled consumers.
   registerForBackpressure(socket);
 
+
   socket.on('disconnect', async (reason: string) => {
     console.log('User disconnected:', userId, reason);
+
+  socket.on('disconnect', async () => {
+    console.log('User disconnected:', userId);
+
     clearHeartbeatTimer(socket.id);
     unregisterDeviceSocket(socket.id);
     unregisterForBackpressure(socket);
     clearViolations(socket.id);
+
 
     // During a gateway restart we must NOT wipe presence — surviving
     // devices re-assert via heartbeat and Redis TTLs. This satisfies
@@ -187,6 +202,8 @@ io.on('connection', async (socket: AuthSocket) => {
     ) {
       return;
     }
+
+
 
     if (appRedis) {
       await cleanupStaleSockets(io, appRedis, userId, socket.id);
