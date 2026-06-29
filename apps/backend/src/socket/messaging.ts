@@ -14,16 +14,45 @@ import type { AuthSocket } from '../middleware/socketAuth.js';
 import { invalidateConversationCaches } from '../lib/conversationCache.js';
 import { serializeMessage } from '../lib/messages.js';
 import { redis } from '../lib/redis.js';
+<<<<<<<< <Temporary merge branch 1
 import { dispatchOfflinePush, FILE_CONTENT_TYPES } from '../services/pushNotification.js';
 import { deliverMessage } from '../services/deliveryPipeline.js';
 import { publishEphemeral, readMissedEvents } from '../services/resumeStream.js';
+=========
 import { validateMessagePayload } from '../lib/validateMessagePayload.js';
+<<<<<<< HEAD
+import { dispatchOfflinePush, FILE_CONTENT_TYPES } from '../services/pushNotification.js';
+import { deliverMessage } from '../services/deliveryPipeline.js';
+import { publishEphemeral, readMissedEvents } from '../services/resumeStream.js';
+=======
+>>>>>>> e7b25b359e78829a44d02d24946ee0d04af1ee32
+>>>>>>>>> Temporary merge branch 2
 
 const PAGE_SIZE = 30;
 
 export function registerMessagingHandlers(io: Server, socket: AuthSocket): void {
   const userId = socket.auth!.userId;
+  const dispatcher = new EventDispatcher(io, socket, redis);
   const typingTimers = new Map<string, NodeJS.Timeout>();
+
+  socket.on('disconnect', () => {
+    for (const [timerKey, timer] of typingTimers.entries()) {
+      clearTimeout(timer);
+      const idx = timerKey.indexOf(':');
+      const cid = idx === -1 ? timerKey : timerKey.slice(0, idx);
+      const did = idx === -1 ? undefined : timerKey.slice(idx + 1);
+      const rp: { conversationId: string; userId: string; deviceId?: string } = {
+        conversationId: cid,
+        userId,
+      };
+      if (did) rp.deviceId = did;
+      socket.to(cid).emit('typing_stop', rp);
+    }
+    typingTimers.clear();
+  });
+
+  // ── join_room ──────────────────────────────────────────────────────────────
+=========
 
   socket.on('disconnect', () => {
     for (const [timerKey, timer] of typingTimers.entries()) {
@@ -45,7 +74,8 @@ export function registerMessagingHandlers(io: Server, socket: AuthSocket): void 
     typingTimers.clear();
   });
 
-  // ── join_room ──────────────────────────────────────────────────────────────
+  // ── join_room ─────────────────────────────────────────────────────────────
+>>>>>>>>> Temporary merge branch 2
   socket.on('join_room', async (payload: { conversationId: string }) => {
     const { conversationId } = payload;
 
@@ -66,6 +96,9 @@ export function registerMessagingHandlers(io: Server, socket: AuthSocket): void 
   });
 
   // ── send_message ───────────────────────────────────────────────────────────
+=========
+  // ── send_message ──────────────────────────────────────────────────────────
+>>>>>>>>> Temporary merge branch 2
   socket.on(
     'send_message',
     async (payload: {
@@ -75,47 +108,21 @@ export function registerMessagingHandlers(io: Server, socket: AuthSocket): void 
       contentType?: string;
       ciphertext?: string;
       envelopes?: Array<{ recipientDeviceId: string; ciphertext: string }>;
-      /** UUID of an already-uploaded file; required for file/image/video/audio messages */
       fileId?: string;
     }) => {
+<<<<<<<<< Temporary merge branch 1
+      const { conversationId, messageId, content, contentType, ciphertext, envelopes } = payload;
+      const deviceId = socket.auth!.deviceId;
+
+=========
+<<<<<<< HEAD
       const { conversationId, messageId, content, contentType, ciphertext, envelopes, fileId } =
         payload;
       const deviceId = socket.auth!.deviceId;
 
-      const membership = await db.query.conversationMembers.findFirst({
-        where: and(
-          eq(conversationMembers.conversationId, conversationId),
-          eq(conversationMembers.userId, userId),
-        ),
-      });
-
-      if (!membership) {
-        socket.emit('error', {
-          event: 'send_message',
-          message: 'Not a member of this conversation',
-        });
-        return;
-      }
-
-      // Clear active typing state as soon as the member attempts to send.
-      for (const [timerKey, timer] of typingTimers.entries()) {
-        if (timerKey === conversationId || timerKey.startsWith(`${conversationId}:`)) {
-          clearTimeout(timer);
-          typingTimers.delete(timerKey);
-
-          const idx = timerKey.indexOf(':');
-          const did = idx === -1 ? undefined : timerKey.slice(idx + 1);
-
-          const rp: { conversationId: string; userId: string; deviceId?: string } = {
-            conversationId,
-            userId,
-          };
-
-          if (did) rp.deviceId = did;
-
-          socket.to(conversationId).emit('typing_stop', rp);
-        }
-      }
+=======
+      const { conversationId, messageId, contentType, ciphertext, envelopes, fileId } = payload;
+      const deviceId = socket.auth!.deviceId;
 
       if (!messageId) {
         socket.emit('error', { event: 'send_message', message: 'messageId is required' });
@@ -123,6 +130,62 @@ export function registerMessagingHandlers(io: Server, socket: AuthSocket): void 
       }
 
       // ── content-type-specific validation ────────────────────────────────────
+      const validation = validateMessagePayload({ contentType, ciphertext, envelopes, fileId });
+      if (!validation.ok) {
+        socket.emit('error', {
+          event: 'send_message',
+          code: validation.code,
+          message: validation.message,
+        });
+        return;
+      }
+
+>>>>>>> e7b25b359e78829a44d02d24946ee0d04af1ee32
+>>>>>>>>> Temporary merge branch 2
+  const membership = await db.query.conversationMembers.findFirst({
+    where: and(
+      eq(conversationMembers.conversationId, conversationId),
+      eq(conversationMembers.userId, userId),
+    ),
+  });
+
+  if (!membership) {
+    socket.emit('error', {
+      event: 'send_message',
+      message: 'Not a member of this conversation',
+    });
+    return;
+  }
+
+  // Clear active typing state as soon as the member attempts to send.
+  for (const [timerKey, timer] of typingTimers.entries()) {
+    if (timerKey === conversationId || timerKey.startsWith(`${conversationId}:`)) {
+      clearTimeout(timer);
+      typingTimers.delete(timerKey);
+      const idx = timerKey.indexOf(':');
+      const did = idx === -1 ? undefined : timerKey.slice(idx + 1);
+      const rp: { conversationId: string; userId: string; deviceId?: string } = {
+        conversationId,
+        userId,
+      };
+      if (did) rp.deviceId = did;
+      socket.to(conversationId).emit('typing_stop', rp);
+    }
+  }
+
+  if (!messageId) {
+    socket.emit('error', { event: 'send_message', message: 'messageId is required' });
+    return;
+  }
+
+<<<<<<<< <Temporary merge branch 1
+  const effectiveCiphertext = ciphertext ?? content ?? null;
+
+  if (!effectiveCiphertext?.trim() && (!envelopes || envelopes.length === 0)) {
+    socket.emit('error', { event: 'send_message', message: 'Message content is empty' });
+=========
+      // ── content-type-specific validation ────────────────────────────────────
+      // ciphertext ?? content: support both field names for backwards compat.
       const effectiveCiphertext = ciphertext ?? content ?? undefined;
       const validation = validateMessagePayload({
         contentType,
@@ -136,29 +199,40 @@ export function registerMessagingHandlers(io: Server, socket: AuthSocket): void 
           code: validation.code,
           message: validation.message,
         });
+>>>>>>>>> Temporary merge branch 2
         return;
       }
 
-      const existing = await db.query.messages.findFirst({
-        where: eq(messages.id, messageId),
-        columns: { sequenceNumber: true },
-      });
+    const existing = await db.query.messages.findFirst({
+      where: eq(messages.id, messageId),
+      columns: { sequenceNumber: true },
+    });
 
-      if (existing) {
-        socket.emit('message_ack', { messageId, sequenceNumber: existing.sequenceNumber });
-        return;
-      }
+    if (existing) {
+      socket.emit('message_ack', { messageId, sequenceNumber: existing.sequenceNumber });
+      return;
+    }
 
       // #231 – create file tracking record for file-type messages
+<<<<<<<<< Temporary merge branch 1
+      let fileId: string | undefined;
+      const resolvedContentType = contentType || 'text/plain';
+      if (FILE_CONTENT_TYPES.has(resolvedContentType)) {
+=========
       let resolvedFileId: string | undefined = fileId;
       const resolvedContentType = contentType?.trim().toLowerCase() || 'text';
       if (!resolvedFileId && FILE_CONTENT_TYPES.has(resolvedContentType)) {
+>>>>>>>>> Temporary merge branch 2
         const [fileRow] = await db
           .insert(files)
           .values({ storageKey: messageId })
           .onConflictDoUpdate({ target: files.storageKey, set: { storageKey: messageId } })
           .returning({ id: files.id });
+<<<<<<<<< Temporary merge branch 1
+        fileId = fileRow?.id;
+=========
         resolvedFileId = fileRow?.id;
+>>>>>>>>> Temporary merge branch 2
       }
 
       const [message] = await db
@@ -169,54 +243,73 @@ export function registerMessagingHandlers(io: Server, socket: AuthSocket): void 
           senderId: userId,
           senderDeviceId: deviceId,
           contentType: resolvedContentType,
+<<<<<<<<< Temporary merge branch 1
+          ciphertext: effectiveCiphertext,
+          fileId: fileId ?? null,
+=========
           ciphertext: effectiveCiphertext ?? null,
           fileId: resolvedFileId ?? null,
+>>>>>>>>> Temporary merge branch 2
         })
         .returning();
 
-      if (envelopes && envelopes.length > 0) {
-        const deviceIds = envelopes.map((e) => e.recipientDeviceId);
+    let recipientDeviceIds: string[] = [];
 
-        const devicesList = await db.query.userDevices.findMany({
-          where: inArray(userDevices.id, deviceIds),
-          columns: { id: true, userId: true },
-        });
-
-        const deviceToUser = new Map(devicesList.map((d) => [d.id, d.userId]));
-
-        const validEnvelopes = envelopes
-          .filter((env) => deviceToUser.has(env.recipientDeviceId))
-          .map((env) => ({
-            messageId,
-            recipientDeviceId: env.recipientDeviceId,
-            recipientUserId: deviceToUser.get(env.recipientDeviceId)!,
-            ciphertext: env.ciphertext,
-          }));
-
-        if (validEnvelopes.length > 0) {
-          await db.insert(messageEnvelopes).values(validEnvelopes);
-        }
-      }
-
-      if (message) {
-        socket.emit('message_ack', {
-          messageId,
-          sequenceNumber: message.sequenceNumber,
-        });
-      }
-
-      await deliverMessage(io, message, conversationId);
-
-      const members = await db.query.conversationMembers.findMany({
-        where: eq(conversationMembers.conversationId, conversationId),
-        columns: { userId: true },
+    if (envelopes && envelopes.length > 0) {
+      const deviceIds = envelopes.map((e) => e.recipientDeviceId);
+      const devicesList = await db.query.userDevices.findMany({
+        where: inArray(userDevices.id, deviceIds),
+        columns: { id: true, userId: true },
       });
+      const deviceToUser = new Map(devicesList.map((d) => [d.id, d.userId]));
 
-      await invalidateConversationCaches(members.map((member) => member.userId));
-    },
-  );
+      const validEnvelopes = envelopes
+        .filter((env) => deviceToUser.has(env.recipientDeviceId))
+        .map((env) => ({
+          messageId,
+          recipientDeviceId: env.recipientDeviceId,
+          recipientUserId: deviceToUser.get(env.recipientDeviceId)!,
+          ciphertext: env.ciphertext,
+        }));
+
+      if (validEnvelopes.length > 0) {
+        await db.insert(messageEnvelopes).values(validEnvelopes);
+
+        if (redis && message) {
+          for (const env of validEnvelopes) {
+            publishToDevice(redis, env.recipientDeviceId, {
+              messageId: message.id,
+              conversationId,
+              ciphertext: env.ciphertext,
+              sequenceNumber: message.sequenceNumber,
+            }).catch(() => {});
+          }
+        }
+
+        recipientDeviceIds = validEnvelopes.map((e) => e.recipientDeviceId);
+      }
+    }
+
+    if (message) {
+      socket.emit('message_ack', { messageId, sequenceNumber: message.sequenceNumber });
+    }
+
+    await deliverMessage(io, message, conversationId);
+
+    const members = await db.query.conversationMembers.findMany({
+      where: eq(conversationMembers.conversationId, conversationId),
+      columns: { userId: true },
+    });
+
+    await invalidateConversationCaches(members.map((member) => member.userId));
+
+    void dispatchOfflinePush(conversationId, messageId, recipientDeviceIds);
+  });
 
   // ── edit_message ───────────────────────────────────────────────────────────
+=========
+  // ── edit_message ──────────────────────────────────────────────────────────
+>>>>>>>>> Temporary merge branch 2
   socket.on(
     'edit_message',
     async (payload: {
@@ -225,52 +318,51 @@ export function registerMessagingHandlers(io: Server, socket: AuthSocket): void 
       contentType?: string;
       ciphertext?: string;
       envelopes?: Array<{ recipientDeviceId: string; ciphertext: string }>;
-    }) => {
-      const { originalMessageId, messageId, contentType, ciphertext, envelopes } = payload;
-      const deviceId = socket.auth!.deviceId;
+    };
+    const deviceId = socket.auth!.deviceId;
 
-      if (!originalMessageId || !messageId) {
-        socket.emit('error', {
-          event: 'edit_message',
-          message: 'originalMessageId and messageId are required',
-        });
-        return;
-      }
-
-      if (!ciphertext?.trim() && (!envelopes || envelopes.length === 0)) {
-        socket.emit('error', { event: 'edit_message', message: 'Message content is empty' });
-        return;
-      }
-
-      const original = await db.query.messages.findFirst({
-        where: eq(messages.id, originalMessageId),
+    if (!originalMessageId || !messageId) {
+      socket.emit('error', {
+        event: 'edit_message',
+        message: 'originalMessageId and messageId are required',
       });
+      return;
+    }
 
-      if (!original) {
-        socket.emit('error', { event: 'edit_message', message: 'Original message not found' });
-        return;
-      }
+    if (!ciphertext?.trim() && (!envelopes || envelopes.length === 0)) {
+      socket.emit('error', { event: 'edit_message', message: 'Message content is empty' });
+      return;
+    }
 
-      if (original.senderId !== userId) {
-        socket.emit('error', {
-          event: 'edit_message',
-          message: 'Only the original sender can edit this message',
-        });
-        return;
-      }
+    const original = await db.query.messages.findFirst({
+      where: eq(messages.id, originalMessageId),
+    });
 
-      const rootMessageId = original.editsMessageId ?? original.id;
-      const conversationId = original.conversationId;
+    if (!original) {
+      socket.emit('error', { event: 'edit_message', message: 'Original message not found' });
+      return;
+    }
 
-      const existing = await db.query.messages.findFirst({
-        where: eq(messages.id, messageId),
-        columns: { sequenceNumber: true },
+    if (original.senderId !== userId) {
+      socket.emit('error', {
+        event: 'edit_message',
+        message: 'Only the original sender can edit this message',
       });
+      return;
+    }
 
-      if (existing) {
-        socket.emit('message_ack', { messageId, sequenceNumber: existing.sequenceNumber });
-        return;
-      }
+    const rootMessageId = original.editsMessageId ?? original.id;
+    const conversationId = original.conversationId;
+
+    const existing = await db.query.messages.findFirst({
+      where: eq(messages.id, messageId),
+      columns: { sequenceNumber: true },
+    });
+
+    if (existing) {
+      socket.emit('message_ack', { messageId, sequenceNumber: existing.sequenceNumber });
+      return;
+    }
 
       const [message] = await db
         .insert(messages)
@@ -279,63 +371,72 @@ export function registerMessagingHandlers(io: Server, socket: AuthSocket): void 
           conversationId,
           senderId: userId,
           senderDeviceId: deviceId,
+<<<<<<<<< Temporary merge branch 1
           contentType: contentType || original.contentType,
-          ciphertext: ciphertext || null,
-          editsMessageId: rootMessageId,
+=========
+<<<<<<< HEAD
+          contentType: contentType || original.contentType,
+=======
+          // Normalise to the validated value (validator already lower-cased it)
+          contentType: contentType?.trim().toLowerCase() || 'text',
+>>>>>>> e7b25b359e78829a44d02d24946ee0d04af1ee32
+>>>>>>>>> Temporary merge branch 2
+    ciphertext: ciphertext || null,
+      editsMessageId: rootMessageId,
         })
         .returning();
 
-      let recipientDeviceIds: string[] = [];
+  let recipientDeviceIds: string[] = [];
 
-      if (envelopes && envelopes.length > 0) {
-        const deviceIds = envelopes.map((e) => e.recipientDeviceId);
+  if (envelopes && envelopes.length > 0) {
+    const deviceIds = envelopes.map((e) => e.recipientDeviceId);
 
-        const devicesList = await db.query.userDevices.findMany({
-          where: inArray(userDevices.id, deviceIds),
-          columns: { id: true, userId: true },
-        });
+    const devicesList = await db.query.userDevices.findMany({
+      where: inArray(userDevices.id, deviceIds),
+      columns: { id: true, userId: true },
+    });
 
-        const deviceToUser = new Map(devicesList.map((d) => [d.id, d.userId]));
+    const deviceToUser = new Map(devicesList.map((d) => [d.id, d.userId]));
 
-        const validEnvelopes = envelopes
-          .filter((env) => deviceToUser.has(env.recipientDeviceId))
-          .map((env) => ({
-            messageId,
-            recipientDeviceId: env.recipientDeviceId,
-            recipientUserId: deviceToUser.get(env.recipientDeviceId)!,
-            ciphertext: env.ciphertext,
-          }));
+    const validEnvelopes = envelopes
+      .filter((env) => deviceToUser.has(env.recipientDeviceId))
+      .map((env) => ({
+        messageId,
+        recipientDeviceId: env.recipientDeviceId,
+        recipientUserId: deviceToUser.get(env.recipientDeviceId)!,
+        ciphertext: env.ciphertext,
+      }));
 
-        if (validEnvelopes.length > 0) {
-          await db.insert(messageEnvelopes).values(validEnvelopes);
-        }
+    if (validEnvelopes.length > 0) {
+      await db.insert(messageEnvelopes).values(validEnvelopes);
+      recipientDeviceIds = validEnvelopes.map((e) => e.recipientDeviceId);
+    }
+  }
 
-        recipientDeviceIds = validEnvelopes.map((e) => e.recipientDeviceId);
-      }
+  if (message) {
+    socket.emit('message_ack', { messageId, sequenceNumber: message.sequenceNumber });
+    io.to(conversationId).emit('new_message', message);
+  }
 
-      if (message) {
-        socket.emit('message_ack', { messageId, sequenceNumber: message.sequenceNumber });
-        io.to(conversationId).emit('new_message', message);
-      }
+  io.to(conversationId).emit('message_edited', {
+    originalMessageId: rootMessageId,
+    newMessageId: messageId,
+  });
 
-      io.to(conversationId).emit('message_edited', {
-        originalMessageId: rootMessageId,
-        newMessageId: messageId,
-      });
+  const members = await db.query.conversationMembers.findMany({
+    where: eq(conversationMembers.conversationId, conversationId),
+    columns: { userId: true },
+  });
 
-      const members = await db.query.conversationMembers.findMany({
-        where: eq(conversationMembers.conversationId, conversationId),
-        columns: { userId: true },
-      });
+  await invalidateConversationCaches(members.map((member) => member.userId));
 
-      await invalidateConversationCaches(members.map((member) => member.userId));
+  void dispatchOfflinePush(conversationId, messageId, recipientDeviceIds);
+});
 
-      // #236 – push to offline recipient devices (fire-and-forget)
-      void dispatchOfflinePush(conversationId, messageId, recipientDeviceIds);
-    },
-  );
-
-  // ── message_history ────────────────────────────────────────────────────────
+// ── message_history ────────────────────────────────────────────────────────
+=========
+  // ── message_history ───────────────────────────────────────────────────────
+>>>>>>>>> Temporary merge branch 2
   socket.on('message_history', async (payload: { conversationId: string; before?: string }) => {
     const { conversationId, before } = payload;
 
@@ -379,6 +480,9 @@ export function registerMessagingHandlers(io: Server, socket: AuthSocket): void 
   });
 
   // ── delete_message ─────────────────────────────────────────────────────────
+=========
+  // ── delete_message ────────────────────────────────────────────────────────
+>>>>>>>>> Temporary merge branch 2
   socket.on('delete_message', async (payload: { messageId: string }) => {
     const { messageId } = payload;
     if (!messageId) return;
@@ -399,7 +503,6 @@ export function registerMessagingHandlers(io: Server, socket: AuthSocket): void 
 
     await db.delete(messageEnvelopes).where(eq(messageEnvelopes.messageId, messageId));
 
-    // #231 – soft-delete file record when message had a file attachment
     if (message.fileId) {
       const { softDeleteFile } = await import('../services/fileCleanup.js');
       await softDeleteFile(message.fileId);
@@ -409,73 +512,74 @@ export function registerMessagingHandlers(io: Server, socket: AuthSocket): void 
   });
 
   // ── message_read ───────────────────────────────────────────────────────────
+=========
+  // ── message_read ──────────────────────────────────────────────────────────
+>>>>>>>>> Temporary merge branch 2
   socket.on(
     'message_read',
     async (payload: { conversationId: string; lastReadMessageId: string }) => {
       const { conversationId, lastReadMessageId } = payload;
 
-      const membership = await db.query.conversationMembers.findFirst({
-        where: and(
+    const membership = await db.query.conversationMembers.findFirst({
+      where: and(
+        eq(conversationMembers.conversationId, conversationId),
+        eq(conversationMembers.userId, userId),
+      ),
+    });
+
+    if (!membership) {
+      socket.emit('error', { event: 'message_read', message: 'Not a member of this conversation' });
+      return;
+    }
+
+    const message = await db.query.messages.findFirst({
+      where: and(eq(messages.id, lastReadMessageId), eq(messages.conversationId, conversationId)),
+    });
+
+    if (!message) {
+      socket.emit('error', {
+        event: 'message_read',
+        message: 'Message not found in conversation',
+      });
+      return;
+    }
+
+    await db
+      .update(conversationMembers)
+      .set({ lastReadMessageId })
+      .where(
+        and(
           eq(conversationMembers.conversationId, conversationId),
           eq(conversationMembers.userId, userId),
         ),
+      );
+
+    io.to(conversationId).volatile.emit('read_receipt', { userId, lastReadMessageId });
+
+    if (redis) {
+      const members = await db.query.conversationMembers.findMany({
+        where: eq(conversationMembers.conversationId, conversationId),
+        columns: { userId: true },
       });
+      await publishEphemeral(
+        redis,
+        members.map((member) => member.userId),
+        { type: 'read_receipt', data: { conversationId, userId, lastReadMessageId } },
+      );
+    }
+  });
 
-      if (!membership) {
-        socket.emit('error', {
-          event: 'message_read',
-          message: 'Not a member of this conversation',
-        });
-        return;
-      }
-
-      const message = await db.query.messages.findFirst({
-        where: and(eq(messages.id, lastReadMessageId), eq(messages.conversationId, conversationId)),
-      });
-
-      if (!message) {
-        socket.emit('error', {
-          event: 'message_read',
-          message: 'Message not found in conversation',
-        });
-        return;
-      }
-
-      await db
-        .update(conversationMembers)
-        .set({ lastReadMessageId })
-        .where(
-          and(
-            eq(conversationMembers.conversationId, conversationId),
-            eq(conversationMembers.userId, userId),
-          ),
-        );
-
-      io.to(conversationId).volatile.emit('read_receipt', { userId, lastReadMessageId });
-
-      if (redis) {
-        const members = await db.query.conversationMembers.findMany({
-          where: eq(conversationMembers.conversationId, conversationId),
-          columns: { userId: true },
-        });
-
-        await publishEphemeral(
-          redis,
-          members.map((member) => member.userId),
-          { type: 'read_receipt', data: { conversationId, userId, lastReadMessageId } },
-        );
-      }
-    },
-  );
-
-  // ── resume ────────────────────────────────────────────────────────────────
-  socket.on('resume', async (payload: { lastEventId?: string }) => {
+  // ── resume ─────────────────────────────────────────────────────────────────
+  dispatcher.register('resume', async (payload) => {
     if (!redis) {
       socket.emit('resume_complete', { lastEventId: null, syncRequired: true });
       return;
     }
 
-    const lastEventId = typeof payload?.lastEventId === 'string' ? payload.lastEventId : '';
+    const lastEventId =
+      typeof (payload as { lastEventId?: string }).lastEventId === 'string'
+        ? (payload as { lastEventId: string }).lastEventId
+        : '';
 
     const missed = await readMissedEvents(redis, userId, lastEventId);
 
@@ -491,155 +595,148 @@ export function registerMessagingHandlers(io: Server, socket: AuthSocket): void 
     socket.emit('resume_complete', { lastEventId: newCursor, syncRequired: true });
   });
 
-  // ── create_conversation ───────────────────────────────────────────────────
-  socket.on(
-    'create_conversation',
-    async (payload: { type: 'dm' | 'group'; name?: string; memberIds: string[] }) => {
-      const { type, name, memberIds } = payload;
+  // ── create_conversation ────────────────────────────────────────────────────
+  dispatcher.register('create_conversation', async (payload) => {
+    const { type, name, memberIds } = payload as {
+      type: 'dm' | 'group';
+      name?: string;
+      memberIds: string[];
+    };
 
-      const allMembers = Array.from(new Set([userId, ...memberIds]));
+    const allMembers = Array.from(new Set([userId, ...memberIds]));
 
-      const [conversation] = await db.insert(conversations).values({ type, name }).returning();
+    const [conversation] = await db.insert(conversations).values({ type, name }).returning();
 
-      if (!conversation) {
+    if (!conversation) {
+      socket.emit('error', {
+        event: 'create_conversation',
+        message: 'Failed to create conversation',
+      });
+      return;
+    }
+
+    await db
+      .insert(conversationMembers)
+      .values(allMembers.map((uid) => ({ conversationId: conversation.id, userId: uid })));
+
+    socket.emit('conversation_created', conversation);
+
+    await invalidateConversationCaches(allMembers);
+  });
+
+  // ── typing_start ───────────────────────────────────────────────────────────
+  dispatcher.register('typing_start', async (payload) => {
+    const { conversationId, deviceId: payloadDeviceId } = payload as {
+      conversationId: string;
+      deviceId?: string;
+    };
+
+    if (!conversationId?.trim()) {
+      socket.emit('error', { event: 'typing_start', message: 'Invalid conversationId' });
+      return;
+    }
+
+    if (!socket.rooms?.has(conversationId)) {
+      const membership = await db.query.conversationMembers.findFirst({
+        where: and(
+          eq(conversationMembers.conversationId, conversationId),
+          eq(conversationMembers.userId, userId),
+        ),
+      });
+
+      if (!membership) {
         socket.emit('error', {
-          event: 'create_conversation',
-          message: 'Failed to create conversation',
+          event: 'typing_start',
+          message: 'Not a member of this conversation',
         });
         return;
       }
+    }
 
-      await db
-        .insert(conversationMembers)
-        .values(allMembers.map((uid) => ({ conversationId: conversation.id, userId: uid })));
+    const relayPayload: { conversationId: string; userId: string; deviceId?: string } = {
+      conversationId,
+      userId,
+    };
 
-      socket.emit('conversation_created', conversation);
+    if (payloadDeviceId?.trim()) {
+      relayPayload.deviceId = payloadDeviceId.trim();
+    }
 
-      await invalidateConversationCaches(allMembers);
-    },
-  );
+    const timerKey = relayPayload.deviceId
+      ? `${conversationId}:${relayPayload.deviceId}`
+      : conversationId;
 
-  // ── typing_start ──────────────────────────────────────────────────────────
-  socket.on(
-    'typing_start',
-    async (payload?: { conversationId?: string; deviceId?: string; [key: string]: unknown }) => {
-      if (
-        !payload ||
-        typeof payload.conversationId !== 'string' ||
-        !payload.conversationId.trim()
-      ) {
-        socket.emit('error', { event: 'typing_start', message: 'Invalid conversationId' });
-        return;
-      }
+    const existing = typingTimers.get(timerKey);
+    if (existing) clearTimeout(existing);
 
-      const conversationId = payload.conversationId.trim();
-
-      if (!socket.rooms?.has(conversationId)) {
-        const membership = await db.query.conversationMembers.findFirst({
-          where: and(
-            eq(conversationMembers.conversationId, conversationId),
-            eq(conversationMembers.userId, userId),
-          ),
-        });
-
-        if (!membership) {
-          socket.emit('error', {
-            event: 'typing_start',
-            message: 'Not a member of this conversation',
-          });
-          return;
-        }
-      }
-
-      const relayPayload: { conversationId: string; userId: string; deviceId?: string } = {
-        conversationId,
-        userId,
-      };
-
-      if (typeof payload.deviceId === 'string' && payload.deviceId.trim()) {
-        relayPayload.deviceId = payload.deviceId.trim();
-      }
-
-      const timerKey = relayPayload.deviceId
-        ? `${conversationId}:${relayPayload.deviceId}`
-        : conversationId;
-
-      const existingTimer = typingTimers.get(timerKey);
-      if (existingTimer) {
-        clearTimeout(existingTimer);
-      }
-
-      const timer = setTimeout(() => {
-        typingTimers.delete(timerKey);
-        socket.to(conversationId).emit('typing_stop', relayPayload);
-      }, 5000);
-
-      typingTimers.set(timerKey, timer);
-
-      socket.to(conversationId).emit('typing_start', relayPayload);
-    },
-  );
-
-  // ── typing_stop ───────────────────────────────────────────────────────────
-  socket.on(
-    'typing_stop',
-    async (payload?: { conversationId?: string; deviceId?: string; [key: string]: unknown }) => {
-      if (
-        !payload ||
-        typeof payload.conversationId !== 'string' ||
-        !payload.conversationId.trim()
-      ) {
-        socket.emit('error', { event: 'typing_stop', message: 'Invalid conversationId' });
-        return;
-      }
-
-      const conversationId = payload.conversationId.trim();
-
-      if (!socket.rooms?.has(conversationId)) {
-        const membership = await db.query.conversationMembers.findFirst({
-          where: and(
-            eq(conversationMembers.conversationId, conversationId),
-            eq(conversationMembers.userId, userId),
-          ),
-        });
-
-        if (!membership) {
-          socket.emit('error', {
-            event: 'typing_stop',
-            message: 'Not a member of this conversation',
-          });
-          return;
-        }
-      }
-
-      const relayPayload: { conversationId: string; userId: string; deviceId?: string } = {
-        conversationId,
-        userId,
-      };
-
-      if (typeof payload.deviceId === 'string' && payload.deviceId.trim()) {
-        relayPayload.deviceId = payload.deviceId.trim();
-      }
-
-      const timerKey = relayPayload.deviceId
-        ? `${conversationId}:${relayPayload.deviceId}`
-        : conversationId;
-
-      const existingTimer = typingTimers.get(timerKey);
-      if (existingTimer) {
-        clearTimeout(existingTimer);
-        typingTimers.delete(timerKey);
-      }
-
+    const timer = setTimeout(() => {
+      typingTimers.delete(timerKey);
       socket.to(conversationId).emit('typing_stop', relayPayload);
-    },
-  );
+    }, 5000);
 
-  // ── ask_assistant ─────────────────────────────────────────────────────────
+    typingTimers.set(timerKey, timer);
+    socket.to(conversationId).emit('typing_start', relayPayload);
+  });
+
+  // ── typing_stop ────────────────────────────────────────────────────────────
+  dispatcher.register('typing_stop', async (payload) => {
+    const { conversationId, deviceId: payloadDeviceId } = payload as {
+      conversationId: string;
+      deviceId?: string;
+    };
+
+    if (!conversationId?.trim()) {
+      socket.emit('error', { event: 'typing_stop', message: 'Invalid conversationId' });
+      return;
+    }
+
+    if (!socket.rooms?.has(conversationId)) {
+      const membership = await db.query.conversationMembers.findFirst({
+        where: and(
+          eq(conversationMembers.conversationId, conversationId),
+          eq(conversationMembers.userId, userId),
+        ),
+      });
+
+      if (!membership) {
+        socket.emit('error', {
+          event: 'typing_stop',
+          message: 'Not a member of this conversation',
+        });
+        return;
+      }
+    }
+
+    const relayPayload: { conversationId: string; userId: string; deviceId?: string } = {
+      conversationId,
+      userId,
+    };
+
+    if (payloadDeviceId?.trim()) {
+      relayPayload.deviceId = payloadDeviceId.trim();
+    }
+
+    const timerKey = relayPayload.deviceId
+      ? `${conversationId}:${relayPayload.deviceId}`
+      : conversationId;
+
+    const existing = typingTimers.get(timerKey);
+    if (existing) {
+      clearTimeout(existing);
+      typingTimers.delete(timerKey);
+    }
+
+    socket.to(conversationId).emit('typing_stop', relayPayload);
+  });
+
+  // ── ask_assistant ──────────────────────────────────────────────────────────
   const ASSISTANT_USER_ID = '00000000-0000-4000-8000-000000000000';
 
-  socket.on('ask_assistant', async (payload: { conversationId: string; content: string }) => {
-    const { conversationId, content } = payload;
+  dispatcher.register('ask_assistant', async (payload) => {
+    const { conversationId, content } = payload as {
+      conversationId: string;
+      content: string;
+    };
 
     if (!content?.trim().startsWith('@assistant')) {
       return;
@@ -678,7 +775,11 @@ export function registerMessagingHandlers(io: Server, socket: AuthSocket): void 
       const response = await fetch('http://localhost:8000/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+<<<<<<<<< Temporary merge branch 1
         body: JSON.stringify({ message: ciphertext, conversation_id: conversationId }),
+=========
+        body: JSON.stringify({ message: content, conversation_id: conversationId }),
+>>>>>>>>> Temporary merge branch 2
       });
 
       if (!response.ok) {
@@ -726,4 +827,7 @@ export function registerMessagingHandlers(io: Server, socket: AuthSocket): void 
       socket.emit('error', { event: 'ask_assistant', message: 'Failed to get AI reply' });
     }
   });
+
+  // Activate the standard envelope dispatcher.
+  dispatcher.listen();
 }
