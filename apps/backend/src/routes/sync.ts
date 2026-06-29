@@ -9,8 +9,7 @@ export const syncRouter: RouterType = Router();
 syncRouter.use(requireAuth);
 
 // TTL for offline envelope retention (default 7 days, configurable via env).
-const ENVELOPE_TTL_MS =
-  parseInt(process.env['ENVELOPE_TTL_SECONDS'] ?? '604800', 10) * 1000;
+const ENVELOPE_TTL_MS = parseInt(process.env['ENVELOPE_TTL_SECONDS'] ?? '604800', 10) * 1000;
 
 const SYNC_PAGE_SIZE = parseInt(process.env['SYNC_PAGE_SIZE'] ?? '50', 10);
 
@@ -29,7 +28,11 @@ const SYNC_PAGE_SIZE = parseInt(process.env['SYNC_PAGE_SIZE'] ?? '50', 10);
 syncRouter.get('/', async (req: AuthRequest, res) => {
   const { userId } = req.auth!;
 
-  const { deviceId, sinceSequence, limit: limitParam } = req.query as {
+  const {
+    deviceId,
+    sinceSequence,
+    limit: limitParam,
+  } = req.query as {
     deviceId?: string;
     sinceSequence?: string;
     limit?: string;
@@ -85,10 +88,7 @@ syncRouter.get('/', async (req: AuthRequest, res) => {
         eq(messageEnvelopes.recipientDeviceId, deviceId),
         gt(messages.sequenceNumber, cursor),
         // Exclude TTL-expired envelopes (already delivered AND past retention).
-        or(
-          isNull(messageEnvelopes.deliveredAt),
-          gt(messageEnvelopes.createdAt, ttlCutoff),
-        ),
+        or(isNull(messageEnvelopes.deliveredAt), gt(messageEnvelopes.createdAt, ttlCutoff)),
         isNull(messages.deletedAt),
       ),
     )
@@ -98,8 +98,7 @@ syncRouter.get('/', async (req: AuthRequest, res) => {
   const hasMore = rows.length > pageSize;
   const page = hasMore ? rows.slice(0, pageSize) : rows;
 
-  const nextCursor =
-    page.length > 0 ? page[page.length - 1]!.sequenceNumber : cursor;
+  const nextCursor = page.length > 0 ? page[page.length - 1]!.sequenceNumber : cursor;
 
   // Mark returned envelopes as delivered (best-effort — do not block response).
   if (page.length > 0) {

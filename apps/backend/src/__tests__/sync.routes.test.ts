@@ -91,7 +91,9 @@ function mockDbQuery(rows: ReturnType<typeof makeEnvelopeRow>[]) {
   const innerJoinFn = vi.fn().mockReturnValue({ where: whereFn });
   const fromFn = vi.fn().mockReturnValue({ innerJoin: innerJoinFn });
   mockSelect.mockReturnValue({ from: fromFn });
-  mockUpdate.mockReturnValue({ set: vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue(undefined) }) });
+  mockUpdate.mockReturnValue({
+    set: vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue(undefined) }),
+  });
   return { limitFn, orderByFn, whereFn };
 }
 

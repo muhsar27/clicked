@@ -1,6 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { EventEmitter } from 'events';
-import { deviceChannel, publishToDevice, GatewayDeviceSubscriber } from '../services/deviceDelivery.js';
+import {
+  deviceChannel,
+  publishToDevice,
+  GatewayDeviceSubscriber,
+} from '../services/deviceDelivery.js';
 import type { DeviceDeliveryPayload } from '../services/deviceDelivery.js';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -63,7 +67,9 @@ describe('publishToDevice', () => {
   it('does not throw when Redis publish fails', async () => {
     const { redis } = makeRedis();
     redis.publish.mockRejectedValue(new Error('Redis down'));
-    await expect(publishToDevice(redis as never, 'device-1', SAMPLE_PAYLOAD)).resolves.toBeUndefined();
+    await expect(
+      publishToDevice(redis as never, 'device-1', SAMPLE_PAYLOAD),
+    ).resolves.toBeUndefined();
   });
 });
 

@@ -63,7 +63,11 @@ export class GatewayDeviceSubscriber {
       await this.sub.subscribe(deviceChannel(deviceId));
     } catch (err) {
       this.handlers.delete(deviceId);
-      console.warn('[deviceDelivery] subscribe failed for device', deviceId, (err as Error).message);
+      console.warn(
+        '[deviceDelivery] subscribe failed for device',
+        deviceId,
+        (err as Error).message,
+      );
     }
   }
 

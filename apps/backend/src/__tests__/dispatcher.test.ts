@@ -6,7 +6,9 @@ import type { Server } from 'socket.io';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-function makeSocket(auth: { userId: string; deviceId: string } | null = { userId: 'u1', deviceId: 'd1' }) {
+function makeSocket(
+  auth: { userId: string; deviceId: string } | null = { userId: 'u1', deviceId: 'd1' },
+) {
   const emitter = new EventEmitter();
   const emitted: Array<{ event: string; data: unknown }> = [];
   const rawEmit = emitter.emit.bind(emitter);
