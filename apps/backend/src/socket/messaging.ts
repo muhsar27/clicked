@@ -14,13 +14,10 @@ import type { AuthSocket } from '../middleware/socketAuth.js';
 import { invalidateConversationCaches } from '../lib/conversationCache.js';
 import { serializeMessage } from '../lib/messages.js';
 import { redis } from '../lib/redis.js';
-import { validateMessagePayload } from '../lib/validateMessagePayload.js';
-<<<<<<< HEAD
 import { dispatchOfflinePush, FILE_CONTENT_TYPES } from '../services/pushNotification.js';
 import { deliverMessage } from '../services/deliveryPipeline.js';
 import { publishEphemeral, readMissedEvents } from '../services/resumeStream.js';
-=======
->>>>>>> e7b25b359e78829a44d02d24946ee0d04af1ee32
+import { validateMessagePayload } from '../lib/validateMessagePayload.js';
 
 const PAGE_SIZE = 30;
 
@@ -48,7 +45,7 @@ export function registerMessagingHandlers(io: Server, socket: AuthSocket): void 
     typingTimers.clear();
   });
 
-  // ── join_room ─────────────────────────────────────────────────────────────
+  // ── join_room ──────────────────────────────────────────────────────────────
   socket.on('join_room', async (payload: { conversationId: string }) => {
     const { conversationId } = payload;
 
@@ -68,7 +65,7 @@ export function registerMessagingHandlers(io: Server, socket: AuthSocket): void 
     socket.emit('room_joined', { conversationId });
   });
 
-  // ── send_message ──────────────────────────────────────────────────────────
+  // ── send_message ───────────────────────────────────────────────────────────
   socket.on(
     'send_message',
     async (payload: {
@@ -81,32 +78,10 @@ export function registerMessagingHandlers(io: Server, socket: AuthSocket): void 
       /** UUID of an already-uploaded file; required for file/image/video/audio messages */
       fileId?: string;
     }) => {
-<<<<<<< HEAD
       const { conversationId, messageId, content, contentType, ciphertext, envelopes, fileId } =
         payload;
       const deviceId = socket.auth!.deviceId;
 
-=======
-      const { conversationId, messageId, contentType, ciphertext, envelopes, fileId } = payload;
-      const deviceId = socket.auth!.deviceId;
-
-      if (!messageId) {
-        socket.emit('error', { event: 'send_message', message: 'messageId is required' });
-        return;
-      }
-
-      // ── content-type-specific validation ────────────────────────────────────
-      const validation = validateMessagePayload({ contentType, ciphertext, envelopes, fileId });
-      if (!validation.ok) {
-        socket.emit('error', {
-          event: 'send_message',
-          code: validation.code,
-          message: validation.message,
-        });
-        return;
-      }
-
->>>>>>> e7b25b359e78829a44d02d24946ee0d04af1ee32
       const membership = await db.query.conversationMembers.findFirst({
         where: and(
           eq(conversationMembers.conversationId, conversationId),
@@ -148,7 +123,6 @@ export function registerMessagingHandlers(io: Server, socket: AuthSocket): void 
       }
 
       // ── content-type-specific validation ────────────────────────────────────
-      // ciphertext ?? content: support both field names for backwards compat.
       const effectiveCiphertext = ciphertext ?? content ?? undefined;
       const validation = validateMessagePayload({
         contentType,
@@ -242,7 +216,7 @@ export function registerMessagingHandlers(io: Server, socket: AuthSocket): void 
     },
   );
 
-  // ── edit_message ──────────────────────────────────────────────────────────
+  // ── edit_message ───────────────────────────────────────────────────────────
   socket.on(
     'edit_message',
     async (payload: {
@@ -305,12 +279,7 @@ export function registerMessagingHandlers(io: Server, socket: AuthSocket): void 
           conversationId,
           senderId: userId,
           senderDeviceId: deviceId,
-<<<<<<< HEAD
           contentType: contentType || original.contentType,
-=======
-          // Normalise to the validated value (validator already lower-cased it)
-          contentType: contentType?.trim().toLowerCase() || 'text',
->>>>>>> e7b25b359e78829a44d02d24946ee0d04af1ee32
           ciphertext: ciphertext || null,
           editsMessageId: rootMessageId,
         })
@@ -366,7 +335,7 @@ export function registerMessagingHandlers(io: Server, socket: AuthSocket): void 
     },
   );
 
-  // ── message_history ───────────────────────────────────────────────────────
+  // ── message_history ────────────────────────────────────────────────────────
   socket.on('message_history', async (payload: { conversationId: string; before?: string }) => {
     const { conversationId, before } = payload;
 
@@ -409,7 +378,7 @@ export function registerMessagingHandlers(io: Server, socket: AuthSocket): void 
     });
   });
 
-  // ── delete_message ────────────────────────────────────────────────────────
+  // ── delete_message ─────────────────────────────────────────────────────────
   socket.on('delete_message', async (payload: { messageId: string }) => {
     const { messageId } = payload;
     if (!messageId) return;
@@ -439,7 +408,7 @@ export function registerMessagingHandlers(io: Server, socket: AuthSocket): void 
     io.to(message.conversationId).emit('message_deleted', { messageId });
   });
 
-  // ── message_read ──────────────────────────────────────────────────────────
+  // ── message_read ───────────────────────────────────────────────────────────
   socket.on(
     'message_read',
     async (payload: { conversationId: string; lastReadMessageId: string }) => {
@@ -709,7 +678,7 @@ export function registerMessagingHandlers(io: Server, socket: AuthSocket): void 
       const response = await fetch('http://localhost:8000/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: content, conversation_id: conversationId }),
+        body: JSON.stringify({ message: ciphertext, conversation_id: conversationId }),
       });
 
       if (!response.ok) {

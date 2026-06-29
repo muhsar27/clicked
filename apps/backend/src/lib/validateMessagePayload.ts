@@ -41,9 +41,7 @@ const FILE_CONTENT_TYPES = new Set(['file', 'image', 'video', 'audio'] as const)
  * @returns `{ ok: true }` when the payload is valid, or
  *          `{ ok: false, code, message }` describing the rejection.
  */
-export function validateMessagePayload(
-  payload: MessagePayload,
-): MessagePayloadValidationResult {
+export function validateMessagePayload(payload: MessagePayload): MessagePayloadValidationResult {
   // Normalise: trim and lower-case; default to 'text' when absent
   const contentType = (payload.contentType?.trim().toLowerCase() || 'text') as string;
 
@@ -81,7 +79,8 @@ export function validateMessagePayload(
       return {
         ok: false,
         code: 400,
-        message: 'envelopes are required for file-type messages (they carry the encrypted file key)',
+        message:
+          'envelopes are required for file-type messages (they carry the encrypted file key)',
       };
     }
     return { ok: true };

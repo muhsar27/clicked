@@ -18,12 +18,7 @@ export const EnvelopeSchema = z.object({
 export const SendMessageSchema = z.object({
   conversationId: z.string().uuid('conversationId must be a valid UUID'),
   messageId: z.string().uuid('messageId must be a valid UUID'),
-  contentType: z
-    .string()
-    .trim()
-    .toLowerCase()
-    .optional()
-    .default('text'),
+  contentType: z.string().trim().toLowerCase().optional().default('text'),
   ciphertext: z.string().optional(),
   envelopes: z.array(EnvelopeSchema).optional(),
   /** UUID of an already-uploaded file; required when contentType is file/image/video/audio */
