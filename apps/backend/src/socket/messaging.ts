@@ -12,6 +12,7 @@ import type { AuthSocket } from '../middleware/socketAuth.js';
 import { invalidateConversationCaches } from '../lib/conversationCache.js';
 import { serializeMessage } from '../lib/messages.js';
 import { redis } from '../lib/redis.js';
+import { validateMessagePayload } from '../lib/validateMessagePayload.js';
 
 const PAGE_SIZE = 30;
 
@@ -51,8 +52,10 @@ export function registerMessagingHandlers(io: Server, socket: AuthSocket): void 
       contentType?: string;
       ciphertext?: string;
       envelopes?: Array<{ recipientDeviceId: string; ciphertext: string }>;
+      /** UUID of an already-uploaded file; required for file/image/video/audio messages */
+      fileId?: string;
     }) => {
-      const { conversationId, messageId, contentType, ciphertext, envelopes } = payload;
+      const { conversationId, messageId, contentType, ciphertext, envelopes, fileId } = payload;
       const deviceId = socket.auth!.deviceId;
 
       if (!messageId) {
@@ -60,8 +63,14 @@ export function registerMessagingHandlers(io: Server, socket: AuthSocket): void 
         return;
       }
 
-      if (!ciphertext?.trim() && (!envelopes || envelopes.length === 0)) {
-        socket.emit('error', { event: 'send_message', message: 'Message content is empty' });
+      // ── content-type-specific validation ────────────────────────────────────
+      const validation = validateMessagePayload({ contentType, ciphertext, envelopes, fileId });
+      if (!validation.ok) {
+        socket.emit('error', {
+          event: 'send_message',
+          code: validation.code,
+          message: validation.message,
+        });
         return;
       }
 
@@ -98,7 +107,8 @@ export function registerMessagingHandlers(io: Server, socket: AuthSocket): void 
           conversationId,
           senderId: userId,
           senderDeviceId: deviceId,
-          contentType: contentType || 'text/plain',
+          // Normalise to the validated value (validator already lower-cased it)
+          contentType: contentType?.trim().toLowerCase() || 'text',
           ciphertext: ciphertext || null,
         })
         .returning();
