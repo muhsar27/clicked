@@ -185,8 +185,8 @@ async function createGatewayNode(port: number, redis: Redis): Promise<GatewayNod
       await new Promise<void>((resolve, reject) =>
         httpServer.close((err) => (err ? reject(err) : resolve())),
       );
-      pub.disconnect();
-      sub.disconnect();
+      await pub.quit().catch(() => {});
+      await sub.quit().catch(() => {});
     },
   };
 }
@@ -272,7 +272,7 @@ describe('Gateway integration — issue #215', () => {
   });
 
   afterAll(async () => {
-    redis.disconnect();
+    await redis.quit().catch(() => {});
   });
 
   beforeEach(async () => {
@@ -543,7 +543,7 @@ describe('Gateway integration — issue #215', () => {
 
         expect(clientCarol.connected).toBe(false);
       } finally {
-        revSub.disconnect();
+        await revSub.quit().catch(() => {});
         await node.close();
       }
     });
