@@ -14,6 +14,7 @@ import type { AuthSocket } from '../middleware/socketAuth.js';
 import { invalidateConversationCaches } from '../lib/conversationCache.js';
 import { serializeMessage } from '../lib/messages.js';
 import { redis } from '../lib/redis.js';
+import { validateMessagePayload } from '../lib/validateMessagePayload.js';
 import { dispatchOfflinePush, FILE_CONTENT_TYPES } from '../services/pushNotification.js';
 import { deliverMessage } from '../services/deliveryPipeline.js';
 import { publishEphemeral, readMissedEvents } from '../services/resumeStream.js';
@@ -96,10 +97,20 @@ export function registerMessagingHandlers(io: Server, socket: AuthSocket): void 
       return;
     }
 
-    const effectiveCiphertext = ciphertext ?? content ?? null;
+    const effectiveCiphertext = ciphertext ?? content ?? undefined;
 
-    if (!effectiveCiphertext?.trim() && (!envelopes || envelopes.length === 0)) {
-      socket.emit('error', { event: 'send_message', message: 'Message content is empty' });
+    const validation = validateMessagePayload({
+      contentType,
+      ciphertext: effectiveCiphertext,
+      envelopes,
+      fileId,
+    });
+    if (!validation.ok) {
+      socket.emit('error', {
+        event: 'send_message',
+        code: validation.code,
+        message: validation.message,
+      });
       return;
     }
 
