@@ -7,7 +7,9 @@ import {
   pgEnum,
   index,
   integer,
+  serial,
   uniqueIndex,
+  type AnyPgColumn,
 } from 'drizzle-orm/pg-core';
 import { relations, sql } from 'drizzle-orm';
 
@@ -15,6 +17,7 @@ export const users = pgTable('users', {
   id: uuid('id').primaryKey().defaultRandom(),
   username: text('username').unique(),
   avatarUrl: text('avatar_url'),
+  presenceVisible: boolean('presence_visible').notNull().default(true),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 });
@@ -40,6 +43,31 @@ export const conversations = pgTable('conversations', {
   avatarUrl: text('avatar_url'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
 });
+
+export const contentTypeEnum = pgEnum('content_type', [
+  'text',
+  'file',
+  'image',
+  'video',
+  'audio',
+  'system',
+]);
+
+// ─── Files (#231) ─────────────────────────────────────────────────────────────
+//
+// Tracks S3 storage objects for file-type messages. Soft-deleted when all
+// referencing messages are retracted; hard-deleted by the background cleanup job.
+
+export const files = pgTable('files', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  storageKey: text('storage_key').notNull().unique(),
+  deletedAt: timestamp('deleted_at'),
+  hardDeletedAt: timestamp('hard_deleted_at'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+});
+
+export type File = typeof files.$inferSelect;
+export type NewFile = typeof files.$inferInsert;
 
 export const conversationMembers = pgTable('conversation_members', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -76,52 +104,57 @@ export const files = pgTable('files', {
     .notNull()
     .references(() => conversations.id, { onDelete: 'cascade' }),
   status: fileStatusEnum('status').notNull().default('pending'),
-  // Metadata supplied by the client on upload-slot creation.
-  // Size in bytes; mimeType is validated against an allowlist.
   size: integer('size').notNull(),
   mimeType: text('mime_type').notNull(),
   sha256: text('sha256').notNull(),
-  // Object-storage key for the encrypted bytes (set by the server).
   storageKey: text('storage_key').notNull(),
-  // When true this file is a thumbnail for another file (parent referenced in message payload).
   isThumbnail: boolean('is_thumbnail').notNull().default(false),
   createdAt: timestamp('created_at').notNull().defaultNow(),
 });
 
-export const messageContentTypeEnum = pgEnum('message_content_type', [
-  'text',
-  'file',
-  'image',
-  'video',
-  'audio',
-]);
+export const messages = pgTable('messages', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  conversationId: uuid('conversation_id')
+    .notNull()
+    .references(() => conversations.id, { onDelete: 'cascade' }),
+  senderId: uuid('sender_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  senderDeviceId: uuid('sender_device_id').references(() => userDevices.id, {
+    onDelete: 'set null',
+  }),
+  contentType: text('content_type').notNull().default('text/plain'),
+  sequenceNumber: serial('sequence_number'),
+  ciphertext: text('ciphertext'),
+  fileId: uuid('file_id').references(() => files.id, { onDelete: 'set null' }),
+  editsMessageId: uuid('edits_message_id').references((): AnyPgColumn => messages.id, {
+    onDelete: 'set null',
+  }),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  deletedAt: timestamp('deleted_at'),
+});
 
-export const messages = pgTable(
-  'messages',
+export const messageEnvelopes = pgTable(
+  'message_envelopes',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    conversationId: uuid('conversation_id')
+    messageId: uuid('message_id')
       .notNull()
-      .references(() => conversations.id, { onDelete: 'cascade' }),
-    senderId: uuid('sender_id')
+      .references(() => messages.id, { onDelete: 'cascade' }),
+    recipientDeviceId: uuid('recipient_device_id')
+      .notNull()
+      .references(() => userDevices.id, { onDelete: 'cascade' }),
+    recipientUserId: uuid('recipient_user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
-    // For text messages this holds the plaintext (or ciphertext envelope).
-    // For file messages this holds the E2EE envelope JSON which includes
-    // fileId, fileName, mimeType, size, fileKey, and optional thumbnail.
-    // fileKey is ONLY ever inside this encrypted envelope — never in plaintext.
-    content: text('content').notNull(),
-    contentType: messageContentTypeEnum('content_type').notNull().default('text'),
-    // Foreign key to the files table — only set for file/image/video/audio messages.
-    fileId: uuid('file_id').references(() => files.id, { onDelete: 'set null' }),
+    ciphertext: text('ciphertext').notNull(),
+    deliveredAt: timestamp('delivered_at'),
+    readAt: timestamp('read_at'),
     createdAt: timestamp('created_at').notNull().defaultNow(),
-    deletedAt: timestamp('deleted_at'),
   },
   (table) => [
-    index('messages_content_search_idx').using(
-      'gin',
-      sql`to_tsvector('english', ${table.content})`,
-    ),
+    index('me_recipient_device_created_idx').on(table.recipientDeviceId, table.createdAt),
+    index('me_message_idx').on(table.messageId),
   ],
 );
 
@@ -253,28 +286,45 @@ export const treasuryProposalStatusEnum = pgEnum('treasury_proposal_status', [
   'expired',
 ]);
 
-export const treasuryProposals = pgTable(
-  'treasury_proposals',
-  {
-    id: uuid('id').primaryKey().defaultRandom(),
-    contractId: text('contract_id').notNull(),
-    proposalId: text('proposal_id').notNull(),
-    conversationId: uuid('conversation_id').references(() => conversations.id, {
-      onDelete: 'set null',
-    }),
-    status: treasuryProposalStatusEnum('status').notNull().default('active'),
-    approvalsCount: integer('approvals_count').notNull().default(0),
-    rejectionsCount: integer('rejections_count').notNull().default(0),
-    createdAt: timestamp('created_at').notNull().defaultNow(),
-    updatedAt: timestamp('updated_at').notNull().defaultNow(),
-  },
-  (table) => [
-    uniqueIndex('treasury_proposals_contract_proposal_idx').on(table.contractId, table.proposalId),
-  ],
-);
+export const treasuryProposals = pgTable('treasury_proposals', {
+  id: serial('id').primaryKey(),
+  onChainId: integer('on_chain_id').notNull(),
+  conversationId: uuid('conversation_id')
+    .notNull()
+    .references(() => conversations.id, { onDelete: 'cascade' }),
+  proposerId: uuid('proposer_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  toAddress: text('to_address').notNull(),
+  tokenContract: text('token_contract').notNull(),
+  amount: text('amount').notNull(),
+  status: treasuryProposalStatusEnum('status').notNull().default('active'),
+  approvalsCount: integer('approvals_count').notNull().default(0),
+  rejectionsCount: integer('rejections_count').notNull().default(0),
+  threshold: integer('threshold').notNull(),
+  expiresAt: integer('expires_at').notNull(),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
 
 export type TreasuryProposal = typeof treasuryProposals.$inferSelect;
 export type NewTreasuryProposal = typeof treasuryProposals.$inferInsert;
+
+export const pushSubscriptions = pgTable('push_subscriptions', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  deviceId: uuid('device_id')
+    .notNull()
+    .references(() => userDevices.id, { onDelete: 'cascade' }),
+  endpoint: text('endpoint').notNull().unique(),
+  p256dh: text('p256dh').notNull(),
+  auth: text('auth').notNull(),
+  lastUsedAt: timestamp('last_used_at'),
+  disabledAt: timestamp('disabled_at'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+});
+
+export type PushSubscription = typeof pushSubscriptions.$inferSelect;
+export type NewPushSubscription = typeof pushSubscriptions.$inferInsert;
 
 // ─── Relations ────────────────────────────────────────────────────────────────
 
@@ -298,12 +348,13 @@ export const conversationsRelations = relations(conversations, ({ many }) => ({
   files: many(files),
 }));
 
-export const filesRelations = relations(files, ({ one }) => ({
+export const filesRelations = relations(files, ({ one, many }) => ({
   uploader: one(users, { fields: [files.uploaderId], references: [users.id] }),
   conversation: one(conversations, {
     fields: [files.conversationId],
     references: [conversations.id],
   }),
+  messages: many(messages),
 }));
 
 export const conversationMembersRelations = relations(conversationMembers, ({ one }) => ({
@@ -314,13 +365,33 @@ export const conversationMembersRelations = relations(conversationMembers, ({ on
   user: one(users, { fields: [conversationMembers.userId], references: [users.id] }),
 }));
 
-export const messagesRelations = relations(messages, ({ one }) => ({
+export const messagesRelations = relations(messages, ({ one, many }) => ({
   conversation: one(conversations, {
     fields: [messages.conversationId],
     references: [conversations.id],
   }),
   sender: one(users, { fields: [messages.senderId], references: [users.id] }),
+  senderDevice: one(userDevices, {
+    fields: [messages.senderDeviceId],
+    references: [userDevices.id],
+  }),
   file: one(files, { fields: [messages.fileId], references: [files.id] }),
+  envelopes: many(messageEnvelopes),
+  editsMessage: one(messages, {
+    fields: [messages.editsMessageId],
+    references: [messages.id],
+    relationName: 'message_edits',
+  }),
+  edits: many(messages, { relationName: 'message_edits' }),
+}));
+
+export const messageEnvelopesRelations = relations(messageEnvelopes, ({ one }) => ({
+  message: one(messages, { fields: [messageEnvelopes.messageId], references: [messages.id] }),
+  recipientDevice: one(userDevices, {
+    fields: [messageEnvelopes.recipientDeviceId],
+    references: [userDevices.id],
+  }),
+  recipientUser: one(users, { fields: [messageEnvelopes.recipientUserId], references: [users.id] }),
 }));
 
 export const tokenTransfersRelations = relations(tokenTransfers, ({ one }) => ({
@@ -348,6 +419,27 @@ export const oneTimePreKeysRelations = relations(oneTimePreKeys, ({ one }) => ({
   device: one(devices, { fields: [oneTimePreKeys.deviceId], references: [devices.id] }),
 }));
 
+export const userDevicesRelations = relations(userDevices, ({ one, many }) => ({
+  user: one(users, { fields: [userDevices.userId], references: [users.id] }),
+  messages: many(messages),
+  pushSubscriptions: many(pushSubscriptions),
+}));
+
+export const pushSubscriptionsRelations = relations(pushSubscriptions, ({ one }) => ({
+  device: one(userDevices, { fields: [pushSubscriptions.deviceId], references: [userDevices.id] }),
+}));
+
+export const treasuryProposalsRelations = relations(treasuryProposals, ({ one }) => ({
+  conversation: one(conversations, {
+    fields: [treasuryProposals.conversationId],
+    references: [conversations.id],
+  }),
+  proposer: one(users, {
+    fields: [treasuryProposals.proposerId],
+    references: [users.id],
+  }),
+}));
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export type User = typeof users.$inferSelect;
@@ -361,6 +453,8 @@ export type Message = typeof messages.$inferSelect;
 export type NewMessage = typeof messages.$inferInsert;
 export type File = typeof files.$inferSelect;
 export type NewFile = typeof files.$inferInsert;
+export type MessageEnvelope = typeof messageEnvelopes.$inferSelect;
+export type NewMessageEnvelope = typeof messageEnvelopes.$inferInsert;
 export type TokenTransfer = typeof tokenTransfers.$inferSelect;
 export type NewTokenTransfer = typeof tokenTransfers.$inferInsert;
 export type Device = typeof devices.$inferSelect;
@@ -369,3 +463,5 @@ export type SignedPreKey = typeof signedPreKeys.$inferSelect;
 export type NewSignedPreKey = typeof signedPreKeys.$inferInsert;
 export type OneTimePreKey = typeof oneTimePreKeys.$inferSelect;
 export type NewOneTimePreKey = typeof oneTimePreKeys.$inferInsert;
+export type UserDevice = typeof userDevices.$inferSelect;
+export type NewUserDevice = typeof userDevices.$inferInsert;
