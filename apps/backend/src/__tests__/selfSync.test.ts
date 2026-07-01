@@ -78,6 +78,10 @@ vi.mock('../services/deviceDelivery.js', () => ({
   publishToDevice: vi.fn().mockResolvedValue(undefined),
 }));
 
+vi.mock('../lib/validateMessagePayload.js', () => ({
+  validateMessagePayload: vi.fn().mockReturnValue({ ok: true }),
+}));
+
 vi.mock('drizzle-orm', () => ({
   and: vi.fn((...args: unknown[]) => args),
   eq: vi.fn((col: unknown, val: unknown) => ({ col, val })),
