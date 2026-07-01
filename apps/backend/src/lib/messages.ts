@@ -1,4 +1,4 @@
-type MessageLike = {
+export type MessageLike = {
   id: string;
   senderId: string;
   senderDeviceId?: string | null;

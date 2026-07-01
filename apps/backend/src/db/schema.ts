@@ -142,14 +142,6 @@ export const messageEnvelopes = pgTable(
   ],
 );
 
-export const messageEnvelopes = pgTable('message_envelopes', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  messageId: uuid('message_id')
-    .notNull()
-    .references(() => messages.id, { onDelete: 'cascade' }),
-  content: text('content').notNull(),
-  createdAt: timestamp('created_at').notNull().defaultNow(),
-});
 
 // ─── Devices & prekeys (issues #158, #159, #162) ─────────────────────────────
 //
@@ -409,10 +401,6 @@ export const devicesRelations = relations(devices, ({ one, many }) => ({
   oneTimePreKeys: many(oneTimePreKeys),
 }));
 
-export const userDevicesRelations = relations(userDevices, ({ one, many }) => ({
-  user: one(users, { fields: [userDevices.userId], references: [users.id] }),
-  messages: many(messages),
-}));
 
 export const signedPreKeysRelations = relations(signedPreKeys, ({ one }) => ({
   device: one(devices, { fields: [signedPreKeys.deviceId], references: [devices.id] }),
