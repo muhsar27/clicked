@@ -41,6 +41,9 @@ importers:
       '@stellar/stellar-sdk':
         specifier: ^15.1.0
         version: 15.1.0
+      '@types/web-push':
+        specifier: ^3.6.4
+        version: 3.6.4
       cors:
         specifier: ^2.8.6
         version: 2.8.6

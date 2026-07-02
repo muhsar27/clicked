@@ -1,4 +1,5 @@
 import type { Server } from 'socket.io';
+import { createHash } from 'node:crypto';
 import { and, eq, lt, desc, sql, inArray } from 'drizzle-orm';
 
 import { db } from '../db/index.js';
@@ -14,6 +15,7 @@ import type { AuthSocket } from '../middleware/socketAuth.js';
 import { invalidateConversationCaches } from '../lib/conversationCache.js';
 import { serializeMessage } from '../lib/messages.js';
 import { redis } from '../lib/redis.js';
+import { sendPushForMessage } from '../services/push.js';
 import { validateMessagePayload } from '../lib/validateMessagePayload.js';
 import { dispatchOfflinePush, FILE_CONTENT_TYPES } from '../services/pushNotification.js';
 import { deliverMessage } from '../services/deliveryPipeline.js';
@@ -65,25 +67,28 @@ export function registerMessagingHandlers(io: Server, socket: AuthSocket): void 
   });
 
   // ── send_message ───────────────────────────────────────────────────────────
-  dispatcher.register('send_message', async (payload) => {
-    const {
-      conversationId,
-      messageId,
-      content,
-      contentType,
-      ciphertext,
-      envelopes,
-      fileId: payloadFileId,
-    } = payload as {
+  // Payload: { conversationId, messageId, contentType, ciphertext, envelopes, ciphertextSha256? }
+  // Persists the message and broadcasts it to all room members.
+  //
+  // Integrity: when `ciphertextSha256` is present the server computes
+  // SHA-256 over the stored ciphertext and rejects the message on mismatch.
+  // This is a transport-corruption check; the AEAD tag inside the ciphertext
+  // remains the primary integrity mechanism for clients at decryption time.
+  socket.on(
+    'send_message',
+    async (payload: {
       conversationId: string;
       messageId?: string;
       content?: string;
       contentType?: string;
       ciphertext?: string;
+      ciphertextSha256?: string;
       envelopes?: Array<{ recipientDeviceId: string; ciphertext: string }>;
-      fileId?: string;
-    };
-    const deviceId = socket.auth!.deviceId;
+    }) => {
+      const { conversationId, messageId, contentType, ciphertext, ciphertextSha256, envelopes } =
+        payload;
+      const { conversationId, messageId, content, contentType, ciphertext, envelopes } = payload;
+      const deviceId = socket.auth!.deviceId;
 
     // Clear active typing state as soon as the member attempts to send.
     for (const [timerKey, timer] of typingTimers.entries()) {
@@ -249,6 +254,29 @@ export function registerMessagingHandlers(io: Server, socket: AuthSocket): void 
       return;
     }
 
+      // Verify ciphertext integrity when a sha256 is provided.
+      if (ciphertextSha256 && ciphertext) {
+        const computed = createHash('sha256').update(ciphertext, 'utf8').digest('hex');
+        if (computed !== ciphertextSha256) {
+          socket.emit('error', {
+            event: 'integrity_error',
+            message: 'Ciphertext sha256 mismatch',
+          });
+          return;
+        }
+      }
+
+      const [message] = await db
+        .insert(messages)
+        .values({
+          id: messageId,
+          conversationId,
+          senderId: userId,
+          senderDeviceId: deviceId,
+          contentType: contentType || 'text/plain',
+          ciphertext: effectiveCiphertext,
+        })
+        .returning();
     const original = await db.query.messages.findFirst({
       where: eq(messages.id, originalMessageId),
     });
@@ -442,12 +470,37 @@ export function registerMessagingHandlers(io: Server, socket: AuthSocket): void 
 
       io.to(conversationId).emit('new_message', message);
 
+      // Emit a file_message event for file-type content so recipients
+      // know to fetch file bytes via GET /files/:id over HTTP.
+      const ct = contentType || 'text/plain';
+      if (
+        ct.startsWith('file/') ||
+        ct === 'file' ||
+        ct.startsWith('image/') ||
+        ct.startsWith('video/') ||
+        ct.startsWith('audio/')
+      ) {
+        io.to(conversationId).emit('file_message', {
+          messageId,
+          conversationId,
+          fileId: messageId,
+        });
+      }
+
       const members = await db.query.conversationMembers.findMany({
         where: eq(conversationMembers.conversationId, conversationId),
         columns: { userId: true },
       });
 
       await invalidateConversationCaches(members.map((member) => member.userId));
+
+      // Dispatch push notifications to offline members who
+      // haven't muted the conversation and have push enabled.
+      sendPushForMessage({
+        conversationId,
+        messageId,
+        senderId: userId,
+      });
     },
   );
 
