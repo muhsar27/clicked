@@ -1,5 +1,7 @@
 import type { Server } from 'socket.io';
+import { createHash } from 'node:crypto';
 import { and, eq, lt, desc, sql, inArray, isNull, ne } from 'drizzle-orm';
+
 import { db } from '../db/index.js';
 import {
   conversations,
@@ -13,6 +15,7 @@ import type { AuthSocket } from '../middleware/socketAuth.js';
 import { invalidateConversationCaches } from '../lib/conversationCache.js';
 import { serializeMessage } from '../lib/messages.js';
 import { redis } from '../lib/redis.js';
+import { sendPushForMessage } from '../services/push.js';
 import { validateMessagePayload } from '../lib/validateMessagePayload.js';
 import { dispatchOfflinePush, FILE_CONTENT_TYPES } from '../services/pushNotification.js';
 import { deliverMessage } from '../services/deliveryPipeline.js';
@@ -82,25 +85,28 @@ export function registerMessagingHandlers(io: Server, socket: AuthSocket): void 
   });
 
   // ── send_message ───────────────────────────────────────────────────────────
-  dispatcher.register('send_message', async (payload) => {
-    const {
-      conversationId,
-      messageId,
-      content,
-      contentType,
-      ciphertext,
-      envelopes,
-      fileId: payloadFileId,
-    } = payload as {
+  // Payload: { conversationId, messageId, contentType, ciphertext, envelopes, ciphertextSha256? }
+  // Persists the message and broadcasts it to all room members.
+  //
+  // Integrity: when `ciphertextSha256` is present the server computes
+  // SHA-256 over the stored ciphertext and rejects the message on mismatch.
+  // This is a transport-corruption check; the AEAD tag inside the ciphertext
+  // remains the primary integrity mechanism for clients at decryption time.
+  socket.on(
+    'send_message',
+    async (payload: {
       conversationId: string;
       messageId?: string;
       content?: string;
       contentType?: string;
       ciphertext?: string;
+      ciphertextSha256?: string;
       envelopes?: Array<{ recipientDeviceId: string; ciphertext: string }>;
-      fileId?: string;
-    };
-    const deviceId = socket.auth!.deviceId;
+    }) => {
+      const { conversationId, messageId, contentType, ciphertext, ciphertextSha256, envelopes } =
+        payload;
+      const { conversationId, messageId, content, contentType, ciphertext, envelopes } = payload;
+      const deviceId = socket.auth!.deviceId;
 
     // Clear active typing state as soon as the member attempts to send.
     for (const [timerKey, timer] of typingTimers.entries()) {
@@ -281,6 +287,29 @@ export function registerMessagingHandlers(io: Server, socket: AuthSocket): void 
       return;
     }
 
+      // Verify ciphertext integrity when a sha256 is provided.
+      if (ciphertextSha256 && ciphertext) {
+        const computed = createHash('sha256').update(ciphertext, 'utf8').digest('hex');
+        if (computed !== ciphertextSha256) {
+          socket.emit('error', {
+            event: 'integrity_error',
+            message: 'Ciphertext sha256 mismatch',
+          });
+          return;
+        }
+      }
+
+      const [message] = await db
+        .insert(messages)
+        .values({
+          id: messageId,
+          conversationId,
+          senderId: userId,
+          senderDeviceId: deviceId,
+          contentType: contentType || 'text/plain',
+          ciphertext: effectiveCiphertext,
+        })
+        .returning();
     const original = await db.query.messages.findFirst({
       where: eq(messages.id, originalMessageId),
     });
@@ -386,6 +415,143 @@ export function registerMessagingHandlers(io: Server, socket: AuthSocket): void 
     void dispatchOfflinePush(conversationId, messageId, recipientDeviceIds);
   });
 
+  // ── send_file_message ──────────────────────────────────────────────────────
+  // Payload: { conversationId: string; fileId: string; content: string;
+  //            contentType: 'file'|'image'|'video'|'audio' }
+  //
+  // `content` is the E2EE envelope ciphertext. It must contain the fields
+  // { fileId, fileName, mimeType, size, fileKey, thumbnail? } client-side before
+  // encryption. The server only validates that:
+  //   1. The sender is a member of the conversation.
+  //   2. The referenced file exists, is `ready`, and belongs to this conversation
+  //      (uploader access-control — only the uploader may reference a file).
+  //
+  // `fileKey` must NEVER appear server-side in plaintext — it exists only inside
+  // the encrypted `content` envelope.
+  socket.on(
+    'send_file_message',
+    async (payload: {
+      conversationId: string;
+      fileId: string;
+      content: string;
+      contentType: 'file' | 'image' | 'video' | 'audio';
+    }) => {
+      const { conversationId, fileId, content, contentType } = payload;
+
+      if (!content?.trim()) {
+        socket.emit('error', {
+          event: 'send_file_message',
+          message: 'Content (envelope ciphertext) must not be empty',
+        });
+        return;
+      }
+
+      const validContentTypes = ['file', 'image', 'video', 'audio'] as const;
+      if (!validContentTypes.includes(contentType)) {
+        socket.emit('error', {
+          event: 'send_file_message',
+          message: 'contentType must be one of: file, image, video, audio',
+        });
+        return;
+      }
+
+      const membership = await db.query.conversationMembers.findFirst({
+        where: and(
+          eq(conversationMembers.conversationId, conversationId),
+          eq(conversationMembers.userId, userId),
+        ),
+      });
+
+      if (!membership) {
+        socket.emit('error', {
+          event: 'send_file_message',
+          message: 'Not a member of this conversation',
+        });
+        return;
+      }
+
+      // Validate file: must exist, be ready, belong to this conversation, and
+      // have been uploaded by the sender (access-control).
+      const file = await db.query.files.findFirst({
+        where: eq(files.id, fileId),
+      });
+
+      if (!file) {
+        socket.emit('error', { event: 'send_file_message', message: 'File not found' });
+        return;
+      }
+
+      if (file.status !== 'ready') {
+        socket.emit('error', {
+          event: 'send_file_message',
+          message: 'File is not ready for use',
+        });
+        return;
+      }
+
+      if (file.conversationId !== conversationId) {
+        socket.emit('error', {
+          event: 'send_file_message',
+          message: 'File does not belong to this conversation',
+        });
+        return;
+      }
+
+      if (file.uploaderId !== userId) {
+        socket.emit('error', {
+          event: 'send_file_message',
+          message: 'Access denied: you are not the uploader of this file',
+        });
+        return;
+      }
+
+      const [message] = await db
+        .insert(messages)
+        .values({
+          conversationId,
+          senderId: userId,
+          content: content.trim(),
+          contentType,
+          fileId,
+        })
+        .returning();
+
+      io.to(conversationId).emit('new_message', message);
+
+      // Emit a file_message event for file-type content so recipients
+      // know to fetch file bytes via GET /files/:id over HTTP.
+      const ct = contentType || 'text/plain';
+      if (
+        ct.startsWith('file/') ||
+        ct === 'file' ||
+        ct.startsWith('image/') ||
+        ct.startsWith('video/') ||
+        ct.startsWith('audio/')
+      ) {
+        io.to(conversationId).emit('file_message', {
+          messageId,
+          conversationId,
+          fileId: messageId,
+        });
+      }
+
+      const members = await db.query.conversationMembers.findMany({
+        where: eq(conversationMembers.conversationId, conversationId),
+        columns: { userId: true },
+      });
+
+      await invalidateConversationCaches(members.map((member) => member.userId));
+
+      // Dispatch push notifications to offline members who
+      // haven't muted the conversation and have push enabled.
+      sendPushForMessage({
+        conversationId,
+        messageId,
+        senderId: userId,
+      });
+    },
+  );
+
   // ── message_history ────────────────────────────────────────────────────────
   dispatcher.register('message_history', async (payload) => {
     const { conversationId, before } = payload as {
@@ -423,7 +589,11 @@ export function registerMessagingHandlers(io: Server, socket: AuthSocket): void 
         : eq(messages.conversationId, conversationId),
       orderBy: desc(messages.createdAt),
       limit: PAGE_SIZE,
-      with: { sender: { columns: { id: true, username: true, avatarUrl: true } } },
+      with: {
+        envelopes: true,
+        senderDevice: true,
+        sender: { columns: { id: true, username: true, avatarUrl: true } },
+      },
     });
 
     socket.emit('message_history', {

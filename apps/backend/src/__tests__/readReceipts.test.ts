@@ -6,10 +6,12 @@ import { EventEmitter } from 'events';
 const mockFindFirst = vi.fn();
 const mockUpdate = vi.fn();
 
+const mockFindMany = vi.fn();
+
 vi.mock('../db/index.js', () => ({
   db: {
     query: {
-      conversationMembers: { findFirst: mockFindFirst },
+      conversationMembers: { findFirst: mockFindFirst, findMany: mockFindMany },
       messages: { findFirst: mockFindFirst },
     },
     update: mockUpdate,
@@ -21,6 +23,10 @@ vi.mock('../db/schema.js', () => ({
   conversations: {},
   messages: {},
 }));
+
+// Keep these unit tests isolated from the CI Redis service so the
+// if (redis) branch in message_read never runs here.
+vi.mock('../lib/redis.js', () => ({ redis: null }));
 
 vi.mock('drizzle-orm', () => ({
   and: vi.fn((...args: unknown[]) => args),
@@ -46,6 +52,8 @@ vi.mock('../services/deliveryPipeline.js', () => ({
 
 vi.mock('../services/deviceDelivery.js', () => ({
   publishToDevice: vi.fn().mockResolvedValue(undefined),
+  inArray: vi.fn((col: unknown, vals: unknown) => ({ col, vals })),
+  sql: vi.fn(),
 }));
 
 // ── Mock Socket helpers ────────────────────────────────────────────────────
@@ -86,6 +94,7 @@ function makeIo() {
 describe('message_read socket event', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockFindMany.mockResolvedValue([]);
   });
 
   it('persists last_read_message_id and broadcasts read_receipt', async () => {
