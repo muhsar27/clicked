@@ -35,6 +35,23 @@ vi.mock('drizzle-orm', () => ({
   isNull: vi.fn((col: unknown) => ({ col, op: 'isNull' })),
   lt: vi.fn(),
   desc: vi.fn(),
+  sql: vi.fn(),
+  inArray: vi.fn((col: unknown, vals: unknown) => ({ col, vals })),
+}));
+
+vi.mock('../lib/redis.js', () => ({ redis: null }));
+
+vi.mock('../services/pushNotification.js', () => ({
+  dispatchOfflinePush: vi.fn().mockResolvedValue(undefined),
+  FILE_CONTENT_TYPES: new Set<string>(),
+}));
+
+vi.mock('../services/deliveryPipeline.js', () => ({
+  deliverMessage: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock('../services/deviceDelivery.js', () => ({
+  publishToDevice: vi.fn().mockResolvedValue(undefined),
   inArray: vi.fn((col: unknown, vals: unknown) => ({ col, vals })),
   sql: vi.fn(),
 }));
